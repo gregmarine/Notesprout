@@ -381,7 +381,8 @@ full-bleed** — root `FrameLayout`, `paperContainer` the first child, `topBar` 
 trap) — matching the notebook, the pad and the calendar: a shown bar's opaque `paperWhite` covers
 the ink beneath it and the pen refuses there by exclusion, exactly as any other floating bar.
 **Back saves-and-closes; there is no ✓** — the original design had one, but the H5 walk dropped it
-("Back already does the one thing a ✓ would") and put the title in its place. Fixed tools: pen ·
+("Back already does the one thing a ✓ would") and put the title in its place. Fixed tools: pen (in the
+device's shade since arc 49 / P4 — `PaletteBar` on the pen's re-tap, `PenShadePrefs`) ·
 eraser · lasso, 2/3-finger undo/redo over an in-memory `StickyInk` stack, lasso bar Snap · Copy ·
 Cut · Delete (the lasso button carries the clipboard mark, `FloatingSelectionBar.buttonAt` letting
 the bar query its own latch state). Pen-tap paste via `StickyClip`. No shapes, text or stickies
@@ -408,8 +409,11 @@ pageH, viewW, viewH): List<Band>` (below full-width, right page-height, never ov
 `Band.toRect()` is the one Android line — `android.graphics.Rect` is a stub under
 `isReturnDefaultValues`, which is why the pure type the rule is tested through is `Band`, not
 `Rect`). g-paper leaves the area beyond the page white **and writable**, so this exclusion is the
-only thing keeping ink inside the note. **Consequence, accepted like the calendar's (decision 5's
-twin of decision 3):** an old note's ink sits one bar height higher than the ruling it was
+only thing keeping ink inside the note — and since arc 49 / P3 it fences the Supernote panel the
+same way: `StickyEditorActivity` sets `paper.directInk = true` beside the two pen-gesture flags,
+and every panel post is cut around the exclusion rects, so the view-sized committed image's white
+beyond a smaller page never reaches the glass. **Consequence, accepted like the calendar's
+(decision 5's twin of decision 3):** an old note's ink sits one bar height higher than the ruling it was
 authored against — nothing is moved or lost, hiding the chrome shows it plainly.
 
 **Since arc 36 / C2 the editor collapses too**, over the same shared `:sn-screen` piece as the

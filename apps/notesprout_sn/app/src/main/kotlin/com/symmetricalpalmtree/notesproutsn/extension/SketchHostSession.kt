@@ -52,6 +52,13 @@ package com.symmetricalpalmtree.notesproutsn.extension
  * which throws [SketchContract.SKETCH_BAD_IMAGE] and writes nothing). Putting a page size in here
  * would mean trusting whoever set it.
  *
+ * **The guides (arc 51 / J2) are a third window and a third accumulator**, independent of both
+ * raster ones in both directions: [setGuideWindow] never touches the raster windows and
+ * [setWindows] never touches the guide window, and a refused guide save resets the guide
+ * accumulation alone. Same rules otherwise — chunk 0 names the page, every later chunk repeats it,
+ * in order, each within the chunk size and the running total within [SketchContract.MAX_BYTES],
+ * and an empty join is Remove.
+ *
  * **Pixels are never logged; nothing here logs at all** — the binder wrapping it logs counts,
  * layers and durations.
  */
@@ -61,6 +68,10 @@ class SketchHostSession {
      *  and the whole image. **Empty bytes are the wire form for "clear this layer"**, not an
      *  error. */
     class Commit(val pageKey: String, val layer: Int, val bytes: ByteArray)
+
+    /** A committed guide-image save (arc 51 / J2): the page's key and the whole image. **Empty
+     *  bytes are Remove**, not an error. */
+    class GuideCommit(val pageKey: String, val bytes: ByteArray)
 
     /** What [setWindows] answers: the chunk count of each raster now parked, which is exactly the
      *  pair a [SketchPageState] carries. One return value rather than two calls, because the two
@@ -84,6 +95,14 @@ class SketchHostSession {
     private val saveIndex = IntArray(LAYER_COUNT)
     private val saveParts = Array(LAYER_COUNT) { ArrayList<ByteArray>() }
     private val saveBytes = IntArray(LAYER_COUNT)
+
+    // ── The guide window and its accumulator (arc 51 / J2) ──────
+    private var guideKey: String? = null
+    private var guideChunks: List<ByteArray> = emptyList()
+    private var guideSaveKey: String? = null
+    private var guideSaveIndex = 0
+    private var guideSaveParts = ArrayList<ByteArray>()
+    private var guideSaveBytes = 0
 
     /**
      * Load **both** read windows for [pageKey] — [graphite] and [ink], either of which may be empty
@@ -206,6 +225,75 @@ class SketchHostSession {
         Commit(pageKey, layer, bytes)
     }
 
+    /**
+     * Park [bytes] — [pageKey]'s reference image, or empty for none — as the guide window and
+     * answer its chunk count, which is what the [SketchGuideState] built beside it carries. The two
+     * raster windows and every accumulation are untouched.
+     */
+    fun setGuideWindow(pageKey: String, bytes: ByteArray): Int = synchronized(lock) {
+        requireKey(pageKey)
+        requireSize(bytes)
+        guideKey = pageKey
+        guideChunks = ByteChunks.chunk(bytes)
+        guideChunks.size
+    }
+
+    /** The guide window's key, or null before the first [setGuideWindow]. */
+    val guideWindowKey: String? get() = synchronized(lock) { guideKey }
+
+    /** One chunk of the guide window. Outside it — every index, before any [setGuideWindow] — is
+     *  the caller's error, never a blank. */
+    fun readGuideChunk(chunkIndex: Int): ByteArray = synchronized(lock) {
+        require(chunkIndex in guideChunks.indices) {
+            "guide chunk $chunkIndex outside 0..${guideChunks.size - 1}"
+        }
+        guideChunks[chunkIndex]
+    }
+
+    /**
+     * One inbound chunk of a guide-image save — [acceptChunk]'s rules on the guide accumulator.
+     * Returns the [GuideCommit] when [last] closes a valid accumulation, null while more are
+     * expected; any breach throws and resets the guide accumulation only, the byte cap with
+     * [SketchContract.SKETCH_TOO_LARGE] verbatim.
+     */
+    fun acceptGuideChunk(pageKey: String, chunkIndex: Int, chunk: ByteArray, last: Boolean): GuideCommit? =
+        synchronized(lock) {
+            requireKey(pageKey)
+            if (chunkIndex == 0) {
+                resetGuideSaveLocked()
+                guideSaveKey = pageKey
+            }
+            val expected = guideSaveKey
+            if (expected == null || pageKey != expected) {
+                resetGuideSaveLocked()
+                throw IllegalArgumentException("save target changed mid-save")
+            }
+            if (chunkIndex != guideSaveIndex) {
+                resetGuideSaveLocked()
+                throw IllegalArgumentException("chunk $chunkIndex out of order (expected $guideSaveIndex)")
+            }
+            if (chunk.size > SketchContract.SKETCH_CHUNK_BYTES) {
+                resetGuideSaveLocked()
+                throw IllegalArgumentException("chunk over ${SketchContract.SKETCH_CHUNK_BYTES} bytes")
+            }
+            if (guideSaveBytes + chunk.size > SketchContract.MAX_BYTES ||
+                guideSaveParts.size + 1 > SketchContract.MAX_CHUNKS
+            ) {
+                resetGuideSaveLocked()
+                throw IllegalStateException(SketchContract.SKETCH_TOO_LARGE)
+            }
+            guideSaveParts += chunk
+            guideSaveBytes += chunk.size
+            guideSaveIndex++
+            if (!last) return null
+            val bytes = ByteChunks.join(guideSaveParts)
+            resetGuideSaveLocked()
+            GuideCommit(pageKey, bytes)
+        }
+
+    /** How many bytes of a guide-image save are accumulated right now — a log line's number. */
+    fun pendingGuideBytes(): Int = synchronized(lock) { guideSaveBytes }
+
     /** How many bytes of a save are accumulated on [layer] right now — the binder's log line,
      *  nothing more. */
     fun pendingSaveBytes(layer: Int): Int = synchronized(lock) {
@@ -213,9 +301,12 @@ class SketchHostSession {
         saveBytes[layer]
     }
 
-    /** Drop everything — both windows, the ink window and both accumulations: the showing is over
-     *  ([ISketch.end] / the binder's revoke). */
+    /** Drop everything — both raster windows, the ink window, the guide window and all three
+     *  accumulations: the showing is over ([ISketch.end] / the binder's revoke). */
     fun clear(): Unit = synchronized(lock) {
+        guideKey = null
+        guideChunks = emptyList()
+        resetGuideSaveLocked()
         windowKey = null
         for (layer in 0 until LAYER_COUNT) {
             windowChunks[layer] = emptyList()
@@ -238,6 +329,14 @@ class SketchHostSession {
         saveIndex[layer] = 0
         saveParts[layer] = ArrayList()
         saveBytes[layer] = 0
+    }
+
+    /** [resetSaveLocked] for the guide accumulator — the rasters' are never touched. */
+    private fun resetGuideSaveLocked() {
+        guideSaveKey = null
+        guideSaveIndex = 0
+        guideSaveParts = ArrayList()
+        guideSaveBytes = 0
     }
 
     /** The layer's the seam's, checked first on every call that names one — before the key, before

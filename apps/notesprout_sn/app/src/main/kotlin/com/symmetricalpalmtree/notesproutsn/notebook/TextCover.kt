@@ -96,12 +96,14 @@ object TextCover {
         }
 
     /**
-     * The page itself. `RGB_565` because the ground is opaque white and the ink is black — half the
-     * memory of `ARGB_8888` for a picture with no alpha in it (the F5 bitmap-hygiene rule). The
+     * The page itself. `ARGB_8888` since arc 49 / P4, with every other page picture the app bakes
+     * (`RGB_565` before, the F5 bitmap-hygiene rule — the ground is opaque white and the text is
+     * black, so this one gains nothing in tone; it moves so that "a page picture is `ARGB_8888`"
+     * has no exception to remember, at 600 × 800 × 2 more bytes for the moment it is alive). The
      * caller owns the returned bitmap and must recycle it.
      */
     fun draw(markdown: String): Bitmap {
-        val bitmap = Bitmap.createBitmap(WIDTH_PX, HEIGHT_PX, Bitmap.Config.RGB_565)
+        val bitmap = Bitmap.createBitmap(WIDTH_PX, HEIGHT_PX, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
         val head = opening(markdown)

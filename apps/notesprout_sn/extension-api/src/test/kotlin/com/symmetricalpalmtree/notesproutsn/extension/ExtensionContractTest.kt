@@ -41,8 +41,10 @@ class ExtensionContractTest {
         // 20 since arc 45 "Ink" / G2 (two rasters — readSketchChunk / saveSketchChunk take a layer
         // IN PLACE at codes 3–4, SketchPageState carries two byte/chunk pairs, the guard is WebP:
         // the THIRD non-tail break, and the sketch ACTION floor moved 17 → 20 with it — no legacy,
-        // the user's decision 4; only :ext-sketch redeclares).
-        assertEquals(20, ExtensionContract.API_VERSION)
+        // the user's decision 4; only :ext-sketch redeclares); 21 since arc 46 "Palette" / Q1
+        // (SketchToolSettings grows a fourth int, penShade — a PARCEL tail read with the
+        // exhausted-parcel rule; no method, no floor moved, only :ext-sketch redeclares).
+        assertEquals(22, ExtensionContract.API_VERSION)
         assertEquals(9, ExporterContract.MIN_API_VERSION_FOR_DELIVERY)
         assertEquals(6, ExtensionContract.MIN_API_VERSION_FOR_STORE)
         assertEquals(7, ExtensionContract.MIN_API_VERSION_FOR_CALENDAR)
@@ -60,6 +62,9 @@ class ExtensionContractTest {
         assertEquals(20, SketchContract.MIN_API_VERSION_FOR_SKETCH)
         assertEquals(18, SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES)
         assertEquals(19, SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS)
+        // Q1: the pen-shade tail is named at 21 — above the action floor, a live gate in the sense
+        // that :ext-sketch declares it; the action floor itself did not move.
+        assertEquals(21, SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE)
         assertEquals(14, DocumentContract.MIN_API_VERSION_FOR_DOCUMENT_LOOKUP)
         assertEquals(2_000, ExtensionContract.MAX_INK_STROKES)
         assertEquals(60_000, ExtensionContract.MAX_INK_POINTS)
@@ -254,6 +259,8 @@ class ExtensionContractTest {
         assertEquals(SketchContract.MIN_API_VERSION_FOR_SKETCH, ExtensionContract.minApiVersion(sketch))
         for (old in 16..19) assertTrue("a $old sketch screen must not bind", !ExtensionContract.accepts(sketch, old))
         assertTrue(ExtensionContract.accepts(sketch, 20))
+        // Q1: a 21 screen (the pen-shade parcel tail) binds too — a tail never closes a door.
+        assertTrue(ExtensionContract.accepts(sketch, 21))
         assertTrue(!ExtensionContract.accepts(sketch, ExtensionContract.API_VERSION + 1))
         // The screen action is not a service action — it carries no floor of its own.
         assertEquals(1, ExtensionContract.minApiVersion(SketchContract.ACTION_SKETCH_SCREEN))
@@ -306,6 +313,17 @@ class ExtensionContractTest {
         // back on the way in — a drift here is a flag that silently stops crossing.
         assertEquals("chromeHidden", ExtensionContract.EXTRA_CHROME_HIDDEN)
         // A compatible tail: no floor moved for either point that carries it.
+        assertEquals(ExtensionContract.MIN_API_VERSION_FOR_STORE, ExtensionContract.minApiVersion(ExtensionContract.ACTION_SCRATCH_PAD))
+        assertEquals(ExtensionContract.MIN_API_VERSION_FOR_CALENDAR, ExtensionContract.minApiVersion(ExtensionContract.ACTION_CALENDAR))
+    }
+
+    @Test
+    fun penShadeExtraIsPinned() {
+        // Arc 49 / P4. The chrome flag's shape for the pen's shade: out on the launch Intent, back
+        // on the result, an int level on the sixteen-tone ladder — a drift here is a grey that
+        // silently stops crossing, and a pad that opens black under a grey notebook.
+        assertEquals("penShade", ExtensionContract.EXTRA_PEN_SHADE)
+        // Not a version: no floor moved and API_VERSION did not, for either point that carries it.
         assertEquals(ExtensionContract.MIN_API_VERSION_FOR_STORE, ExtensionContract.minApiVersion(ExtensionContract.ACTION_SCRATCH_PAD))
         assertEquals(ExtensionContract.MIN_API_VERSION_FOR_CALENDAR, ExtensionContract.minApiVersion(ExtensionContract.ACTION_CALENDAR))
     }

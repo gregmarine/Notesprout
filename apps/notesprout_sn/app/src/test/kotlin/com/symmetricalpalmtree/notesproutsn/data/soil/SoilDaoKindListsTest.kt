@@ -194,6 +194,55 @@ class SoilDaoKindListsTest {
         assertEquals(true, dao.hasLiveSketch(pageId))
     }
 
+    // ── The two guide rows (arc 51 / J2) ────────────────────────────────────
+
+    /** Guides are tools, never marks: no untyped page read may carry them. */
+    @Test
+    fun `childrenOf never sees a guide row`() = runBlocking {
+        val dao = FakeSoilDao()
+        dao.put("s1", pageId, SoilSchema.TYPE_STROKE)
+        dao.put("gg", pageId, SoilSchema.TYPE_GUIDE_GRID)
+        dao.put("gi", pageId, SoilSchema.TYPE_GUIDE_IMAGE)
+        assertEquals(setOf("s1"), dao.childrenOf(pageId).map { it.id }.toSet())
+    }
+
+    /** A page copied, deleted or undone keeps the guides set for it. */
+    @Test
+    fun `liveDescendantIds carries both guide rows`() = runBlocking {
+        val dao = FakeSoilDao()
+        dao.put("s1", pageId, SoilSchema.TYPE_STROKE)
+        dao.put("gg", pageId, SoilSchema.TYPE_GUIDE_GRID)
+        dao.put("gi", pageId, SoilSchema.TYPE_GUIDE_IMAGE)
+        dao.put("gOld", pageId, SoilSchema.TYPE_GUIDE_IMAGE, deletedAt = 9L)
+        assertEquals(setOf("s1", "gg", "gi"), dao.liveDescendantIds(pageId).toSet())
+    }
+
+    /** Erase page never touches the guides, and a page with only guides has no ink to warn about. */
+    @Test
+    fun `liveErasableIds leaves both guide rows out`() = runBlocking {
+        val dao = FakeSoilDao()
+        dao.put("gg", pageId, SoilSchema.TYPE_GUIDE_GRID)
+        dao.put("gi", pageId, SoilSchema.TYPE_GUIDE_IMAGE)
+        assertEquals(emptyList<String>(), dao.liveErasableIds(pageId))
+        dao.put("s1", pageId, SoilSchema.TYPE_STROKE)
+        assertEquals(setOf("gg", "gi"), dao.liveDescendantIds(pageId).toSet() - dao.liveErasableIds(pageId).toSet())
+    }
+
+    /** The guides are not content: the loose-content list and the sketch question never see them. */
+    @Test
+    fun `liveContentIds and hasLiveSketch ignore the guides`() = runBlocking {
+        val dao = FakeSoilDao()
+        dao.put("gg", pageId, SoilSchema.TYPE_GUIDE_GRID)
+        dao.upsert(
+            SoilObjectEntity(
+                id = "gi", parentId = pageId, type = SoilSchema.TYPE_GUIDE_IMAGE, order = SoilSchema.SKETCH_ORDER,
+                createdAt = 1L, updatedAt = 1L, blob = ByteArray(9),
+            )
+        )
+        assertEquals(emptyList<String>(), dao.liveContentIds(pageId))
+        assertEquals(false, dao.hasLiveSketch(pageId))
+    }
+
     @Test
     fun `liveDescendantIds excludes soft-deleted rows at every level`() = runBlocking {
         val dao = FakeSoilDao()

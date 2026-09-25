@@ -26,6 +26,7 @@ import com.symmetricalpalmtree.notesproutsn.notebook.CollapsedChrome
 import com.symmetricalpalmtree.notesproutsn.notebook.InkSelectionBar
 import com.symmetricalpalmtree.notesproutsn.notebook.PageGestures
 import com.symmetricalpalmtree.notesproutsn.notebook.EraserBar
+import com.symmetricalpalmtree.notesproutsn.notebook.PaletteBar
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperChrome
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -89,6 +90,7 @@ class ScratchPadActivity : InkScreenActivity<ScratchAction>() {
     override val logTag: String get() = TAG
     override val screenRoot: View? get() = if (::binding.isInitialized) binding.root else null
     override val eraserButtonView: View? get() = if (::binding.isInitialized) binding.btnEraser else null
+    override val penButtonView: View? get() = if (::binding.isInitialized) binding.btnPen else null
     override val topBarView: View? get() = if (::binding.isInitialized) binding.topBar else null
     override val bottomBarView: View? get() = if (::binding.isInitialized) binding.bottomBar else null
     override val openingOverlay: View? get() = if (::binding.isInitialized) binding.openingOverlay else null
@@ -112,6 +114,9 @@ class ScratchPadActivity : InkScreenActivity<ScratchAction>() {
 
     override fun syncTool(tool: Tool) = toolbar.sync(tool)
 
+    /** The pen button wears the device's shade (arc 49 / P4) — the toolbar's glyph. */
+    override fun reportPenShade(ink: Int) = toolbar.reportPenShade(ink)
+
     override fun armTool(tool: Tool) = toolbar.arm(tool)
 
     /**
@@ -121,7 +126,7 @@ class ScratchPadActivity : InkScreenActivity<ScratchAction>() {
      */
     override fun collapsedOverflow(): List<CollapsedChrome.Entry> = listOfNotNull(
         backEntry(),
-        CollapsedChrome.Entry.mirroring(R.drawable.ic_pencil_down, binding.btnSend),
+        CollapsedChrome.Entry.mirroring(R.drawable.ic_pen_down, binding.btnSend),
     )
 
     override fun showPage() = showPage(firstLoad = false)
@@ -162,6 +167,15 @@ class ScratchPadActivity : InkScreenActivity<ScratchAction>() {
         // that lassoed differently would read as a bug.
         paper.smartLassoEnabled = true
         paper.scribbleEraseEnabled = true
+        // Arc 49 / P2: the pad's page goes direct to the Supernote panel as the notebook's does
+        // (g-paper Phase 42) — the committed picture is the flatten base, the live pen, the point
+        // eraser and the lasso's trail are painted by the app, the glass shows a dither of the
+        // page. Where the panel refuses to open the page stays the ink daemon's with every overlay
+        // law intact, so this is set unconditionally. Every panel post is cut around the exclusion
+        // rects — PaperChrome's list (both bars, the eraser sub-bar, the floating selection bar,
+        // the collapsed chrome) is what keeps a segment drawn up to a bar from writing page
+        // pixels over it.
+        paper.directInk = true
         paper.setPaperListener(paperListener)
 
         toolbar = ScratchToolbar(
@@ -184,7 +198,10 @@ class ScratchPadActivity : InkScreenActivity<ScratchAction>() {
             // A second tap on the armed eraser toggles its sub-bar — Point · Lasso (arc 29 / LE3);
             // arming a different tool takes the bar with it.
             onEraserReTap = { toggleEraserBar() },
-            onToolTapped = { hideEraserBar() },
+            // Arc 49 / P4: a second tap on the armed pen toggles its shade panel; arming a
+            // different tool takes both sub-bars with it.
+            onPenReTap = { togglePaletteBar() },
+            onToolTapped = { hideEraserBar(); hidePaletteBar() },
             sendEnabled = sendEnabled,
         )
         // After the toolbar: a pick lands on `toolbar.arm` (a host-set tool is never echoed back
@@ -196,6 +213,18 @@ class ScratchPadActivity : InkScreenActivity<ScratchAction>() {
             bandBottom = { chromeBand()?.last },
             paper = paper,
             onPicked = { hideEraserBar(); toolbar.arm(it) },
+        )
+        // The pen's shade panel (arc 49 / P4) — `:sn-screen`'s bar, editing the one device-wide
+        // level; a pick arms the pen and every glyph that shows it, and the level rides the
+        // result Intent home. The bar stays open after a pick (its own rule).
+        paletteBar = PaletteBar(
+            root = binding.root,
+            bar = binding.paletteBar,
+            anchor = binding.btnPen,
+            bandBottom = { chromeBand()?.last },
+            paper = paper,
+            armedLevel = { penShade },
+            onPicked = { level -> applyPenShade(level) },
         )
         selectionBar = InkSelectionBar(
             root = binding.root,
@@ -230,6 +259,9 @@ class ScratchPadActivity : InkScreenActivity<ScratchAction>() {
         // Arc 33: both bars hide and show together on a finger double-tap, opening in the state the
         // host handed over and echoing the final one on the way out (the skeleton's).
         initChrome(savedInstanceState)
+        // Arc 49 / P4: the pen opens in the shade the host handed over (a rebuild's own pick
+        // wins) — after the collapsed chrome exists, so every glyph that wears it is repainted.
+        initPenShade(savedInstanceState)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { exit() }
         })
@@ -383,6 +415,7 @@ class ScratchPadActivity : InkScreenActivity<ScratchAction>() {
         currentSelection = null
         selectionBar.hide()   // idempotent — clearSelection fires onSelectionDismissed too
         hideEraserBar()       // a floating bar never survives a content swap
+        hidePaletteBar()      // nor the shade panel (arc 49 / P4)
         dismissCollapsed()    // and neither do the corner button's rows (arc 36 / C2)
         if (!firstLoad) paper.clearForContentSwap()
         paper.setPageSize(doc.pageWidth.toInt(), doc.pageHeight.toInt())

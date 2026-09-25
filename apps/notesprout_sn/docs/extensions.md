@@ -1860,7 +1860,11 @@ a fourth**, `EXTRA_CALENDAR_EXPORT_ENABLED` (see `docs/export.md` § Calendar mo
 / F3 there is a fifth**, `ExtensionContract.EXTRA_CHROME_HIDDEN` — whether the host's paper screens
 currently hide their chrome, put by the shared `ExtensionScreenEntry.open()` rather than by
 per-point code (§ the scratch-pad point's wire types above; the boundary audit has its own row).
-It is also the **first datum ever carried back on this seam's result Intent**: the calendar echoes
+**Since arc 49 / P4 there is a sixth, an int**: `ExtensionContract.EXTRA_PEN_SHADE`, the
+writing pen's shade as a level on the sixteen-tone ladder — the chrome flag's shape exactly, both
+directions, put by the same `ExtensionScreenEntry.open()` and read back by `PenShadeResult` (a
+level this build lacks folds to black before it is stored; absent writes nothing). It is also the
+**first datum ever carried back on this seam's result Intent**: the calendar echoes
 the chrome state it was left in on the same key, on any result code, and
 `ExtensionScreenEntry.onResult` reads and persists it before anything else runs — before the
 launched coroutine that chains into the pad, so the calendar → pad handoff hands the pad the value
@@ -2734,6 +2738,22 @@ not just its Activity. PSS host 65.8 MB / extension 64.2 MB, well under Paintspr
 
 ---
 
+### J1's four tails: the guides (arc 51 "Guides")
+
+Arc 51 (2026-09-23) lays a **grid** (lines or dots, square cells, one count across the page's
+width, centred) and a **reference image** (fit to the page, one opacity) under the sketch as
+tools — never marks, never exported, covered, erased or drawn into a raster. `API_VERSION` 21 →
+**22**, `SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES` = 22 a method floor (T2's shape), four
+`ISketchHost` tails at transaction codes 14–17 (audit row 71), two parcelables. The settings are
+**per page in the `.soil`** (two additive rows parented to the page, `guide_grid` + `guide_image`),
+not a device setting — the one thing this seam carries that is remembered *with the notebook*; the
+face still writes nothing to disk. The reference image is picked by the face through the system
+picker (the first system picker an extension has opened), decoded and fit in the extension's
+process, and pushed as a page-sized lossy WebP with alpha — `ImageHeader.matches` guards it
+exactly as it guards a raster row (the `VP8X` head is read regardless of the lossy chunk under
+it). Plan + ledger: `extensions/sketch/GUIDES_PLAN.md`; reference: `extensions/sketch/docs/sketch.md`
+§ "Guides (arc 51)".
+
 ## Boundary audit
 
 What crosses the process boundary, in which direction, and what guards it. **Re-walk this table
@@ -2844,6 +2864,8 @@ table, its one disk exception) hold unchanged and are not repeated.
 | 67 | **Arc 43 / K5b: the five page-structure tails cross only ids, a direction, a content bitmask and an opaque token — never a page's pixels or strokes.** `insertPage(direction)` / `deletePage(pageKey)` / `pageContent(pageKey)` answer or take canonical ids and small enums only; `undoPage(token)` / `redoPage(token)` take `SketchPageState.structuralToken`, the host's own opaque name for one structural edit (`MAX_STRUCTURAL_TOKEN_CHARS` 64) — the extension never constructs a token, only echoes one it was handed, so a token from a different showing or a stale one is meaningless to the host's own per-showing ledger and is rejected there, never trusted because it round-tripped through the seam. Behind the method floor `MIN_API_VERSION_FOR_SKETCH_PAGES` = 18; `MIN_API_VERSION_FOR_SKETCH` stays 17, so a 17-only sketch extension never offers insert/delete/undo/redo and the face falls back to view-only paging. | `ExtensionContract.MIN_API_VERSION_FOR_SKETCH_PAGES`(`SketchContract`), `ISketchHost.insertPage/deletePage/pageContent/undoPage/redoPage`, `SketchPageState.structuralToken`, `SketchHostHooks.insertPage/deletePage`, `SketchEdit.Structural` |
 | 68 | **Arc 44 / T2: `toolSettings()`/`putToolSettings()` cross three small ints, as indices, sanity-bounded at unmarshal — never a grey, a px width, or which shades/sizes a build offers.** `SketchToolSettings(tool, shade, size)`'s constructor is the whole check: each field `0..MAX_TOOL_SETTING_INDEX` (255), a bound on "is this a plausible index at all", not on `:ext-sketch`'s own palette, which the host never learns. A **null** answer from `toolSettings()` is a legal reply to a legal question — nothing remembered yet — never an exception; the defaults live in the extension. Logged freely: three small integers say nothing of what a person drew. Behind the method floor `MIN_API_VERSION_FOR_SKETCH_TOOLS` = 19; `MIN_API_VERSION_FOR_SKETCH_PAGES` 18 and `MIN_API_VERSION_FOR_SKETCH` 17 both untouched. | `SketchContract.MIN_API_VERSION_FOR_SKETCH_TOOLS`/`MAX_TOOL_SETTING_INDEX`, `SketchToolSettings`, `ISketchHost.toolSettings/putToolSettings`, `data/prefs/SketchToolPrefs`, `SketchToolCodec` |
 | 69 | **Arc 45 "Ink" / G2: the two rasters' accumulations are independent, and a layer outside `LAYERS` is refused before anything else is read.** `SketchContract.isLayer(layer)` is the first check on every `readSketchChunk` / `saveSketchChunk` call, before the page key, the chunk index or a byte is touched — an unknown layer is `IllegalArgumentException` and nothing about the call's other arguments is evaluated. A graphite stream and an ink stream for the same page may interleave chunk-for-chunk without harm (each accumulates into its own layer's window/accumulator); two streams on the **same** layer may not, which the extension's one push lock (`SketchSaver`'s rule) already guarantees, unchanged since K2. A save whose last chunk fails `ImageHeader.matches` or `SketchContract.MAX_BYTES` resets only that layer's accumulation; the other layer's row and in-flight accumulation, if any, are untouched. | `SketchContract.isLayer`/`LAYERS`/`LAYER_GRAPHITE`/`LAYER_INK`, `SketchHostBinder.readSketchChunk/saveSketchChunk`, `SketchHostSession` (two windows, two accumulators), `SketchSaver` |
+| 70 | **Arc 49 / P4: one integer about the person's own way of working, the chrome flag's shape.** `EXTRA_PEN_SHADE` rides the pad's and the calendar's launch Intent out and their result Intent back — a level on the sixteen-tone ladder, 0 = black … 15 = white, folded to black on either side when the ladder lacks it. No content, no id, no path, no secret: a level names a grey. No version gate, no floor, `API_VERSION` untouched; an older extension ignores the extra and returns none, and the host writes nothing. The plan's derived shape had said an API-22 host-stub tail — but neither ink point has a host-side stub to tail, and rule 50 was the precedent that fit. |
+| 71 | **Arc 51 "Guides" / J1: the four guide tails cross a page's guide settings as five small ints — two indices, two flags and a percent, sanity-bounded at unmarshal — and its reference image as a chunked lossy WebP of exactly the page's size, through a third read window and a third accumulator; never a grey, a px size, or which counts and opacities a build offers.** `guides(pageKey)` parks the page's image in the guide window atomically with the `SketchGuideState` it answers (`imageBytes`/`imageChunks` pinned to `ByteChunks.countFor`, 0 bytes in one chunk = no image row); `readGuideImageChunk(i)` serves that window alone; `putGuides(pageKey, settings)` writes the five ints (`GRID_OFF` soft-deletes the grid row); `saveGuideImageChunk(pageKey, i, chunk, last)` is `saveSketchChunk`'s accumulator on its own slot — `MAX_BYTES` re-checked per chunk (`SKETCH_TOO_LARGE`, that accumulation alone reset), the committed bytes checked against the page's size before any decode (`SKETCH_BAD_IMAGE`), one empty chunk = remove. Any live page of the open notebook may be named; a dead key is `IllegalArgumentException`. The rows (`guide_grid`, `guide_image`) are parented to the page, carried by page copy/delete/undo, and read by nothing that draws, exports, covers or erases. Logged as counts/bytes/ms only. Behind the method floor `MIN_API_VERSION_FOR_SKETCH_GUIDES` = 22; the action floor stays 20. | `SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES`/`GRID_*`/`MAX_OPACITY_PERCENT`, `SketchGuideSettings`, `SketchGuideState`, `ISketchHost.guides/readGuideImageChunk/putGuides/saveGuideImageChunk`, `SketchHostSession` (guide window + accumulator), `data/soil/GuideRows`/`GuideDao`/`GuideRepository` |
 
 **One recorded asymmetry.** The host forces inbound colour to opaque black; the extension does not
 force it on the ink the host sends. That is not an oversight and not a hole: SN's ink is fixed

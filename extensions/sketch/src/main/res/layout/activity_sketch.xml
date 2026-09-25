@@ -4,8 +4,9 @@
   two thin chrome bars overlaid. The PaperView is added into paperContainer programmatically. Paper
   is plain white always (decision 10) — no template, no ink layer underneath.
 
-  Tools are pencil, pen and eraser only — no lasso, no selection toolbar: a sketch page has no
-  objects to select, only pixels. Top bar: Back · Pencil · Pen · Eraser … Bring in ink · Show pages.
+  Tools are pencil, pen, eraser and smudge only — no lasso, no selection toolbar: a sketch page has
+  no objects to select, only pixels. Top bar: Back · Pencil · Pen · Eraser · Smudge … Bring in ink ·
+  Show pages.
   Bottom bar is the pager only.
 
   Both bars go to paper.setExclusionRects (via PaperChrome) after layout, so ink never lands under
@@ -55,7 +56,7 @@
                 android:textColor="@color/inkBlack"
                 android:textSize="16sp" />
 
-            <!-- Back, then the tools: pencil, pen and eraser only, no lasso. -->
+            <!-- Back, then the tools: pencil, pen, eraser and smudge, no lasso; then Guides (arc 51). -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
@@ -69,27 +70,45 @@
                     android:contentDescription="@string/cd_sketch_back"
                     android:src="@drawable/ic_arrow_left" />
 
-                <!-- ic_pen IS Tabler's pencil glyph (the user's call, K5): the sketch's one tool
-                     wears it, and so does the collapsed corner button. -->
+                <!-- ic_pencil is Tabler's pencil glyph (the user's call, K5; renamed from ic_pen 2026-09-22 when
+                     the ballpen became the pen everywhere): the Pencil wears it, and so does the
+                     collapsed corner button. -->
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnPencil"
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:contentDescription="@string/cd_tool_pencil"
-                    android:src="@drawable/ic_pen" />
+                    android:src="@drawable/ic_pencil" />
 
-                <!-- The gel pen (arc 44 / T3) — Tabler's ballpen glyph, a fixed 3 px black line,
-                     no PencilBar of its own. -->
+                <!-- The gel pen (arc 44 / T3) — Tabler's ballpen glyph (ic_pen, the pen everywhere since 2026-09-22), a fixed 5 px line; its
+                     barrel wears the pen's shade since arc 46 (ShadeIcon). -->
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnPen"
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:contentDescription="@string/cd_tool_pen"
-                    android:src="@drawable/ic_ballpen" />
+                    android:src="@drawable/ic_pen" />
 
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnEraser"
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:contentDescription="@string/cd_tool_eraser"
                     android:src="@drawable/ic_eraser" />
+
+                <!-- The stylus smudge (arc 50): the finger rub of arc 48, on the nib, at half its
+                     reach — Tabler's hand-finger. The finger's own rub stays available under every
+                     tool; this arms the stylus for it. -->
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnSmudge"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_tool_smudge"
+                    android:src="@drawable/ic_smudge" />
+
+                <!-- The guides (arc 51): a grid and a reference image under the page, never part
+                     of it — Tabler's grid-dots. Its panel is GuidesBar, hung under it. -->
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btnGuides"
+                    style="@style/Widget.Notesprout.ToolbarButton"
+                    android:contentDescription="@string/cd_sketch_guides"
+                    android:src="@drawable/ic_grid_dots" />
             </LinearLayout>
 
             <!-- Bring in ink (the door back to the notebook's own ink layer), then Show pages. -->
@@ -104,7 +123,7 @@
                     android:id="@+id/btnBringInk"
                     style="@style/Widget.Notesprout.ToolbarButton"
                     android:contentDescription="@string/cd_sketch_bring_ink"
-                    android:src="@drawable/ic_pencil_down" />
+                    android:src="@drawable/ic_pen_down" />
 
                 <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btnShowPages"
@@ -177,11 +196,24 @@
 
     </LinearLayout>
 
-    <!-- The pencil's own options bar (arc 44 / T3) — shade swatches (8 + 7) over a size row, hung
-         under the armed Pencil button on a re-tap. Empty here: its rows and buttons are built in
-         code by PencilBar. -->
+    <!-- The shade panel (arc 46 "Palette"; arc 44 / T3's PencilBar remade) — Atelier's sixteen
+         tones in four rows of four, hung under the armed pen button on its re-tap. Empty here: its
+         rows and swatches are built in code by PaletteBar. -->
     <LinearLayout
-        android:id="@+id/pencilBar"
+        android:id="@+id/paletteBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:background="@drawable/shape_dialog_bordered"
+        android:orientation="vertical"
+        android:padding="4dp"
+        android:visibility="gone" />
+
+    <!-- The guides panel (arc 51 "Guides") — Grid (Off · Lines · Dots, the counts) and Reference
+         (Pick · Remove · Show/Hide, the opacities), hung under the Guides button. Empty here: its
+         rows and latches are built in code by GuidesBar. -->
+    <LinearLayout
+        android:id="@+id/guidesBar"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top|start"
@@ -202,7 +234,7 @@
         android:layout_gravity="top|end"
         android:layout_margin="8dp"
         android:background="@drawable/shape_dialog_bordered"
-        android:src="@drawable/ic_pen"
+        android:src="@drawable/ic_pencil"
         android:visibility="gone"
         android:contentDescription="@string/collapsed_tools" />
 

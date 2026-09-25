@@ -15,13 +15,15 @@ import org.junit.Test
  */
 class CollapsedToolsTest {
 
-    @Test fun `the order is pen, point eraser, lasso eraser, lasso`() {
-        assertEquals(listOf(Tool.PEN, Tool.ERASER, Tool.LASSO_ERASER, Tool.LASSO), CollapsedTools.ORDER)
+    @Test fun `the order is pen, point eraser, smudge, lasso eraser, lasso`() {
+        // The smudge (arc 50, the sketch face's stylus stump) sits after the rubber it resembles.
+        assertEquals(listOf(Tool.PEN, Tool.ERASER, Tool.SMUDGE, Tool.LASSO_ERASER, Tool.LASSO), CollapsedTools.ORDER)
     }
 
     @Test fun `each tool wears its own glyph`() {
         assertEquals(R.drawable.ic_pen, CollapsedTools.iconFor(Tool.PEN))
         assertEquals(R.drawable.ic_eraser, CollapsedTools.iconFor(Tool.ERASER))
+        assertEquals(R.drawable.ic_smudge, CollapsedTools.iconFor(Tool.SMUDGE))
         assertEquals(R.drawable.ic_lasso_eraser, CollapsedTools.iconFor(Tool.LASSO_ERASER))
         assertEquals(R.drawable.ic_lasso, CollapsedTools.iconFor(Tool.LASSO))
     }
@@ -33,14 +35,12 @@ class CollapsedToolsTest {
         assertEquals(R.drawable.ic_eraser, CollapsedTools.iconFor(Tool.ERASER, clipboardLoaded = true))
     }
 
-    @Test fun `the alt pen wears the ballpen - and only under PEN`() {
-        // Arc 44 / T3: the sketch face's gel pen and its pencil are both Tool.PEN, so the glyph is
-        // the only thing that says which one is armed — on the corner button and in the row.
-        assertEquals(R.drawable.ic_ballpen, CollapsedTools.iconFor(Tool.PEN, altPen = true))
-        assertEquals(R.drawable.ic_pen, CollapsedTools.iconFor(Tool.PEN, altPen = false))
-        // A stale flag under another tool changes nothing: the eraser is the eraser.
-        assertEquals(R.drawable.ic_eraser, CollapsedTools.iconFor(Tool.ERASER, altPen = true))
-        assertEquals(R.drawable.ic_pen, CollapsedTools.iconFor(Tool.NONE, altPen = true))
+    @Test fun `the pen wears the ballpen - the pencil glyph is the sketch face's own`() {
+        // 2026-09-22: `ic_pen` is Tabler's ballpen everywhere a pen is meant; the pencil glyph is
+        // `ic_pencil`, worn only by the sketch face's Pencil, which paints its own glyph and never
+        // asks this rule. So there is one pen glyph here and no "alt" flag to keep in step.
+        assertEquals(R.drawable.ic_pen, CollapsedTools.iconFor(Tool.PEN))
+        assertEquals(R.drawable.ic_pen, CollapsedTools.iconFor(Tool.NONE))
     }
 
     @Test fun `exactly one of the two pen buttons reads as armed, and only under PEN`() {

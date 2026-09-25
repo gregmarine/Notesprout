@@ -12,6 +12,7 @@ import com.symmetricalpalmtree.notesproutsn.core.InkColorCodec
 import com.symmetricalpalmtree.notesproutsn.extension.CalendarTarget
 import com.symmetricalpalmtree.notesproutsn.notebook.PaperToolbar
 import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
+import com.symmetricalpalmtree.notesproutsn.notebook.PenShadeGlyph
 
 /**
  * The calendar's chrome (arc 23): Back and the three tools on the top bar, then Today and the three
@@ -32,10 +33,14 @@ import com.symmetricalpalmtree.notesproutsn.notebook.PenIdle
  * bar we have.
  *
  * **The tools are fixed, and they are the notebook's** — the pad's rule, for the pad's reason: PEN ·
- * black · [PEN_WIDTH_PX], eraser [ERASER_RADIUS_PX], no panels, no colour, nothing remembered. Smart
+ * [PEN_WIDTH_PX], eraser [ERASER_RADIUS_PX], no width or style panels. Smart
  * lasso and scribble erase are armed by the screen before the listener attaches. Since arc 29 / LE3
  * the eraser has two kinds, reached the notebook's way: a second tap on the armed eraser opens the
  * shared `EraserBar` (Point · Lasso) — the screen owns the bar, this just forwards the re-tap.
+ * **Since arc 49 / P4 the pen has a shade** — the pad's arrangement exactly: a second tap on the
+ * armed pen opens the shared `PaletteBar` (sixteen greys, one device-wide level the host carries in
+ * on the launch Intent and reads back off the result), the screen owns that bar, this forwards the
+ * re-tap ([onPenReTap]) and wears the tone on the pen button ([reportPenShade], [PenShadeGlyph]).
  *
  * **Send exists only when there is somewhere to send to**: opened from the library there is no
  * notebook behind us, so the button is absent rather than present-and-failing — GONE, never disabled.
@@ -90,6 +95,8 @@ class CalendarToolbar(
     onEraserReTap: () -> Unit,
     /** Any actual tool change — the screen closes the sub-bar that belonged to the old tool. */
     onToolTapped: () -> Unit,
+    /** A tap on the already-armed pen (arc 49 / P4): the screen toggles the shade panel. */
+    onPenReTap: () -> Unit = {},
     sendEnabled: Boolean,
     scratchPadAvailable: Boolean,
     exportEnabled: Boolean,
@@ -99,8 +106,13 @@ class CalendarToolbar(
 
     private val tools: PaperToolbar
 
+    /** The pen button wearing its shade (arc 49 / P4) — black until the screen arms the level the
+     *  host launched it in (`InkScreenActivity.initPenShade`). */
+    private val penGlyph = PenShadeGlyph(btnPen, InkColorCodec.BLACK)
+
     init {
         paper.tool = Tool.PEN
+        // Black until the screen applies the device's shade — the same first answer as before P4.
         paper.penColor = InkColorCodec.BLACK
         paper.penWidth = PEN_WIDTH_PX
         paper.penStyle = StrokeStyle.PEN
@@ -117,6 +129,7 @@ class CalendarToolbar(
             onEraserReTap = onEraserReTap,
             onToolTapped = onToolTapped,
             onSynced = onSynced,
+            onPenReTap = { onPenReTap() },
         )
 
         // Every button carries a hint naming it — the word buttons included: their tooltip is their
@@ -171,6 +184,9 @@ class CalendarToolbar(
 
     /** Arm [tool] from the host side and sync the buttons — what the eraser sub-bar's pick lands on. */
     fun arm(tool: Tool) = tools.arm(tool)
+
+    /** Wear [ink] on the pen button (arc 49 / P4). Unchanged is silent. */
+    fun reportPenShade(ink: Int) = penGlyph.report(ink)
 
     /** The period's title, presented only once the pen is idle (the frame-silence rule). */
     fun setTitle(text: String) {

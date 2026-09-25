@@ -40,10 +40,15 @@ interface SoilDao {
      *  **All three names are excluded**, the two live ones and the dead arc-43 `sketch`
      *  ([SoilSchema.TYPE_SKETCH_DEAD]): there is no migration and no sniffing (decision 4), so a
      *  leftover PNG row on a device that ran an older build must simply never surface as a child of
-     *  its page. It is the one place in the app that names the dead type at all. */
+     *  its page. It is the one place in the app that names the dead type at all.
+     *
+     *  **And the two guide rows** (arc 51 / J2, `guide_grid` + `guide_image`): tools the sketch face
+     *  paints under the pencil, never marks on the page — a reference photo riding every page read
+     *  would be the same megabytes for nothing, and a reader that drew it would draw a guide into
+     *  the page. [GuideDao] is their door. */
     @Query(
         """SELECT * FROM notebook WHERE parentId = :parentId
-           AND type NOT IN ('sketch', 'sketch_graphite', 'sketch_ink')
+           AND type NOT IN ('sketch', 'sketch_graphite', 'sketch_ink', 'guide_grid', 'guide_image')
            AND deletedAt IS NULL ORDER BY `order`"""
     )
     suspend fun childrenOf(parentId: String): List<SoilObjectEntity>
@@ -123,10 +128,14 @@ interface SoilDao {
      *  carry **both** — while a link never wraps one (a sketch is the whole page, so there is
      *  nothing for a lasso to have caught). The dead arc-43 `sketch` name is deliberately *not*
      *  here: a row nothing can read is a row nothing should copy (decision 4). **Erase page is the
-     *  one caller that must not have them** and has [liveErasableIds] instead (decision 11). */
+     *  one caller that must not have them** and has [liveErasableIds] instead (decision 11).
+     *
+     *  The page's **two guide rows** (arc 51 / J2) join at the page level too: a grid and a
+     *  reference image were set for that page, so a copy, a delete and its undo carry them — and,
+     *  like the rasters, Erase page does not. */
     @Query(
         """SELECT id FROM notebook WHERE deletedAt IS NULL AND (
-             (parentId = :pageId AND type IN ('stroke', 'heading', 'link', 'document', 'text', 'shape', 'sticky_note', 'sketch_graphite', 'sketch_ink'))
+             (parentId = :pageId AND type IN ('stroke', 'heading', 'link', 'document', 'text', 'shape', 'sticky_note', 'sketch_graphite', 'sketch_ink', 'guide_grid', 'guide_image'))
              OR parentId IN (SELECT id FROM notebook WHERE parentId = :pageId AND type = 'link' AND deletedAt IS NULL)
              OR parentId IN (SELECT s.id FROM notebook s WHERE s.type = 'sticky_note' AND s.deletedAt IS NULL AND (
                    s.parentId = :pageId
@@ -135,9 +144,10 @@ interface SoilDao {
     suspend fun liveDescendantIds(pageId: String): List<String>
 
     /**
-     * [liveDescendantIds] **minus the page's two sketch rasters** — what **Erase page** clears
-     * (arc 43 / K3, decision 11; both rasters since arc 45 / G2), and the only difference between
-     * the two lists.
+     * [liveDescendantIds] **minus the page's two sketch rasters and its two guide rows** — what
+     * **Erase page** clears (arc 43 / K3, decision 11; both rasters since arc 45 / G2; the guides
+     * since arc 51 / J2, which are the sketch face's tools and no more the ink's than its pixels
+     * are), and the only difference between the two lists.
      *
      * A second query rather than a filter over the first because the difference is a rule, not a
      * convenience: Erase page is an ink door on an ink surface, and the sketch beside the ink is

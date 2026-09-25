@@ -17,9 +17,14 @@
              (host)` lends the host for the whole showing, `end()` drops it — there is NO store:
              the pixels live in the host's own `.soil` and cross the seam as chunked lossless WebP
              — two rasters a page since arc 45 "Ink" — so this point never touches Room / SQLCipher
-             / serialization. **API version 20 since arc 45 / G2–G3.** The number is what this
-             extension REQUIRES OF THE HOST, and 20 is `SketchContract.MIN_API_VERSION_FOR_SKETCH`
-             after G2 moved the point's own ACTION floor 17 → 20: the point's own calls changed
+             / serialization. **API version 22 since arc 51 "Guides" / J1** — the number is what
+             this extension REQUIRES OF THE HOST: 22 is
+             `SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES`, the method floor of the four guide
+             tails (`ISketchHost.guides` / `readGuideImageChunk` / `putGuides` /
+             `saveGuideImageChunk`, codes 14–17 — a grid and a reference image under the sketch,
+             stored per page in the host's `.soil`); 21 was arc 46 / Q1's parcel tail
+             (`SketchToolSettings.penShade`, a fourth int a 20 host would read as absent). The ACTION floor `MIN_API_VERSION_FOR_SKETCH` is still 20, where
+             G2 moved it from 17: the point's own calls changed
              shape in place — `ISketchHost.readSketchChunk` / `saveSketchChunk` (codes 3–4) took a
              raster layer, and `SketchPageState`'s wire form grew a second byte/chunk pair — so
              neither side can read the other's, and a host below 20 never discovers this package at
@@ -38,7 +43,7 @@
             </intent-filter>
             <meta-data
                 android:name="com.symmetricalpalmtree.notesproutsn.extension.API_VERSION"
-                android:value="20" />
+                android:value="22" />
         </service>
 
         <!-- The extension-owned screen (tier 2): exported, custom action, NO launcher filter;

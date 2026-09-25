@@ -162,6 +162,34 @@ object SoilSchema {
     const val TYPE_SKETCH_DEAD = "sketch"
 
     /**
+     * Guides, the **grid** (arc 51 "Guides" / J2) — a sketch page's lines-or-dots grid, the first
+     * additive row that is a **tool rather than a mark**: `parentId` = page id · `text` = a
+     * [GuideGrid] as JSON (kind · count · visible) · `"order"` = [SKETCH_ORDER] ·
+     * everything else null, no blob. One live row per page, minted on the first setting that is not
+     * off, rewritten in place, soft-deleted when the grid is turned off. No version bump, no
+     * migration; Paper ignores it.
+     *
+     * **Nothing that draws, exports, covers or erases ever sees it** — the guides are the face's to
+     * paint under the pencil and nobody else's. [SoilDao.childrenOf] excludes it, Erase page's
+     * [SoilDao.liveErasableIds] leaves it out, and export and the cover read the two raster names
+     * only. It **does** ride [SoilDao.liveDescendantIds]: a page copied, deleted or undone keeps its
+     * guides, because they were set for that page. [GuideRepository] is its only writer.
+     */
+    const val TYPE_GUIDE_GRID = "guide_grid"
+
+    /**
+     * Guides, the **reference image** (arc 51 / J2) — [TYPE_GUIDE_GRID]'s sibling carrying a
+     * picture: `blob` = a page-sized **lossy WebP with alpha** (`RIFF`/`WEBP`/`VP8X`, exactly the
+     * page's `width` × `height` — the rasters' header guard, unchanged) · `text` = a
+     * [GuideImage] as JSON (opacity · visible) · `"order"` = [SKETCH_ORDER]. One live row
+     * per page, minted on the first image saved, its pixels rewritten in place, soft-deleted on
+     * Remove; [com.symmetricalpalmtree.notesproutsn.extension.SketchContract.MAX_BYTES] is its cap
+     * as it is each raster's. Excluded and carried exactly as the grid is — a photo to draw from is
+     * never part of the drawing.
+     */
+    const val TYPE_GUIDE_IMAGE = "guide_image"
+
+    /**
      * A sketch row's `"order"` — **-1, outside every z-order space in the file**, and the same
      * number for both rasters. Every other `"order"` in this format is a position among siblings of
      * the same type, dense from 0; a sketch raster is not one of the marks on the page, it is what

@@ -168,7 +168,7 @@ no lag — **1.2 / 2 / 4 / 7 / 12 / 16 / 20 / 24 / 32 / 48 / 64 / 96 px** in two
 1.2; a fixed **gel pen** (`StrokeStyle.PEN`, black, **5 px** — the hand's own amendment from a
 starting 3, by way of 7); a third top-bar tool button, Pencil · Pen · Eraser, re-tapping the armed
 Pencil opening `PencilBar` over `AnchoredBar`; the Pencil glyph filled with the armed shade
-(`PencilIcon`, `ic_pen_fill`), the fill kept while Pen or Eraser is armed. This is the arc's fresh
+(`PencilIcon`, `ic_pen_fill` — `ic_pencil_fill` since 2026-09-22, when the ballpen became `ic_pen`, the pen glyph on every face, and `ic_pencil_down` became `ic_pen_down`), the fill kept while Pen or Eraser is armed. This is the arc's fresh
 decision in the two places the standing rules require one: it **amends arc 43's decision 3** ("no
 tilt, no width choice, no colour") and it grants the family's **first tool-options bar on an SN
 paper screen** since P1 removed the tool panels — neither is a precedent for the notebook's own
@@ -216,11 +216,59 @@ paper under `DARKEN`) — the "white/highlight pencil" future, decided. Plan + l
 `extensions/sketch/INK_PLAN.md`; reference `extensions/sketch/docs/sketch.md` § "Arc 45's
 decisions". **COMPLETE + FROZEN 2026-09-18 on the user's Nomad hand walk (the white lead walked
 too — "works good enough for now"); `ink` merged to `main` 2026-09-18 (`--no-ff`) and deleted,
-g-paper `two-rasters` likewise** — "on ink" means `main`. No ELEVENTH extension point, no next Sketch phase
-(gel pen sizes or colours, eraser sizes, per-notebook tool memory, an
-`inkLift` fraction, a coloured or grey gel pen, quantizing graphite alpha to the 16-grey ladder)
-and no other new arc without a fresh user decision; no re-raising of any waived / declined review
-finding.
+g-paper `two-rasters` likewise** — "on ink" means `main`.
+
+**Arc 46 "Palette" (2026-09-19, branch `tools`, letter Q, `extensions/sketch/PALETTE_PLAN.md` —
+COMPLETE + FROZEN 2026-09-19 on the user's Nomad and Manta walks; g-paper's
+`ink-over`/`ink-true` merged to g-paper `main` 2026-09-22; **`tools` (arcs 46–51) merged to `main` 2026-09-24 (`--no-ff`) and deleted — "on tools" means `main`**; post-freeze the same day: the face's page
+is remembered on every move, `SketchHostHooks.rememberLastOpened`)**
+— the user's decision that, with the pencil and the pen going direct to the panel under a dither
+(g-paper 0.1.41–0.1.43), the four-tone limit no longer applies: **all sixteen greys for the
+pencil and the gel pen alike** — **Atelier's own sixteen tones** (`SketchPalette.TONES`, darkest
+first, 0 black / 15 white; the pencil's default `#505050`), white included on the pen; **one
+pencil width, 4 px** (arc 44's twelve leads withdrawn); the shade panel **on each pen button's
+re-tap** (the Pencil's for the pencil's shade, the Pen's for the pen's — a Palette button was
+opened and withdrawn on the first walk) with Atelier's swatches in a **4 × 4** (fill · gap ·
+dotted ring; solid ring on the selected); **both pen glyphs wear their own shade** (`ShadeIcon`,
+`ic_ballpen_fill`, now `ic_pen_fill`; `CollapsedChrome.PenKinds.altIcon` + `onReTap(alt, anchor)`,
+`PaperToolbar.onPenReTap(alt)` in `:sn-screen`); and **ink flattened over graphite** — "a white
+gel pen can write over anything" — g-paper **Phase 30 → 0.1.44** (`SRC_OVER`, ink on top, in the
+engine, `SketchRaster` and `SketchCover`; pencil over an ink line is hidden; amends arc 45's "no
+top and no bottom"), then **baked ink shown in its true tone on the panel** — g-paper **Phase 31
+→ 0.1.45** (`DitherFlatten.coverage`: graphite and a live pen stroke dither, settled ink is its
+grey) and **settling at the next non-drawing event rather than at pen-up** — Phase 32 →
+**0.1.46** (a tool or shade pick, a rub, an undo, a page load), the host's `settleDisplay()`
+before chrome opens (Phase 33 → 0.1.47, called from `PaperScreenActivity.toggleChrome`,
+`CollapsedChrome.open` and the sketch face's shade panel), and **the pencil settling in tone
+too** — grain in grey, the dither the live picture only (Phase 34 → **0.1.48**; 0.1.49: the rubber settles before it posts; Phase 35 → **0.1.50**: a 2.5 s pause settles on
+its own — **withdrawn 2026-09-21 by g-paper Phase 37 → 0.1.52**: (**g-paper Phase 39 → 0.1.53 the same day: arc 47's flank is OFF — the Supernote pencil is upright regardless of tilt, round lead**; Phase 38's pale grain built, walked and withdrawn before it; both deferred in root `BACKLOG.md`); a mark settles **only** on the sketch face's **one-finger swipe down** (`PageGestures.onSwipeDown` → `settleDisplay()`) or a page load — the tool / shade / rub / undo / chrome-open settles of Phases 32–34 withdrawn with it; a page turned to is shown settled from its first frame). **Arc 47 "Side" (2026-09-19/20, same branch): the pencil's flank — g-paper Phase 36 → 0.1.51, no seam change; see `extensions/sketch/docs/sketch.md` § "Arc 47's decisions".** **Arc 48 "Smudge" (2026-09-22, same branch, letter S, `extensions/sketch/SMUDGE_PLAN.md`): a one-finger back-and-forth on the sketch page blends the graphite under it into a tone — pencil only, never lifting, a little paling; g-paper Phase 40 → 0.1.54 (`RasterSmudge`, host-driven `beginSmudge`/`smudgeAlong`/`endSmudge`), the face's `SmudgeRub` arms on the first reversal of travel within 280 px of the landing so a swipe never smudges and a rub never swipes; no seam change; see `extensions/sketch/docs/sketch.md` § "The smudge"; **COMPLETE + FROZEN 2026-09-22** on four Nomad hand walks (the tone is a power mean, gamma 3; the finger carries graphite out past a mark, fading; `SKETCH_CHUNK_BYTES` 512 → 128 KiB the same day after a 457 KB chunk reply overran Binder's shared buffer — a page blank on the glass, pixels safe); g-paper `smudge` + `always-dither` MERGED to g-paper `main` and deleted 2026-09-22 (with `settle-gesture`, `ink-over`, `ink-true` — g-paper has only `main`).** **g-paper Phase 41 → 0.1.55 (2026-09-22, branch `always-dither`): the Supernote panel is ALWAYS DITHERED, pencil and pen, loaded pages too — `DISPLAY_SETTLES` false, `settleDisplay()` a no-op, the sketch face's swipe-down settle removed; exports, covers and page images stay true grey ("the dither looks great on the device, and the true tone looks great on the Mac").** Seam:
+`SketchToolSettings` grows a fourth int `penShade` — **a parcel tail, not a method** —
+`API_VERSION` 20 → **21** named by `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE`; the
+action floor stays 20; `size` is a dead wire slot written 0. Reference
+`extensions/sketch/docs/sketch.md` § "Arc 46's decisions" + § "Tools (arcs 44–46)". Branch `tools`
+**merged to `main` 2026-09-24 and deleted**; the next sketch-tool arc opens a fresh branch on the user's word. No ELEVENTH extension point,
+no next Sketch phase (eraser sizes, per-notebook tool memory, an `inkLift` fraction, quantizing
+graphite alpha to the 16-grey ladder, a pencil library of Atelier's grades) and no other new arc
+without a fresh user decision; no re-raising of any waived / declined review finding.
+
+**Arc 51 "Guides" (granted 2026-09-23, branch `tools`, letter J, plan + ledger `extensions/sketch/GUIDES_PLAN.md` — ✅ COMPLETE + FROZEN 2026-09-24 on the user's Nomad hand walks; g-paper `sheet` merged to g-paper `main` and deleted; **`tools` merged to `main` 2026-09-24 (`--no-ff`) and deleted the same day, the last arc on it**):** a **grid** (lines or dots, square cells, one count across the page's width — `2·4·6·8·12` over `16·20·24·28·32` — centred) and a **reference image** (picked from the device by the face — the first system picker any extension has opened — fit to the page, a lossy page-sized WebP with alpha, one opacity `10·25·50·75 %`) lie **under the sketch as tools, never marks**: never exported, covered, erased, rubbed, smudged or drawn into a raster (the export proof: 0 colour pixels). g-paper **Phase 46 → 0.1.61**: `PaperView.setSheet`, a display-only underlay flattened as a third band on the Supernote panel (`DitherFlatten` white → sheet → graphite → ink, bit-identical without one), never in `renderToBitmap`. Two `.soil` rows parented to the page, `guide_grid` + `guide_image` (`GuideRows` / `GuideDao` / `GuideRepository`; `childrenOf` excludes, `liveDescendantIds` carries, Erase page never touches). Seam: `API_VERSION` 21 → **22**, four `ISketchHost` tails (`guides` / `readGuideImageChunk` / `putGuides` / `saveGuideImageChunk`, codes 14–17) behind the method floor `MIN_API_VERSION_FOR_SKETCH_GUIDES`, the action floor still 20, a third read window + accumulator, audit row 71. Chrome: one Guides button (`ic_grid_dots`, after Smudge) + one anchored panel of latches; hidden persists per page; Remove deletes; grid over image. Amends arc 43's decision 10 (the face lays its own sheet). Opus 5.5 coded engine, host and face on Fable's briefs and review. Reference `extensions/sketch/docs/sketch.md` § "Guides (arc 51)". **No new arc without a user decision** (a Drive source for reference images is a noted future).
+
+**Arc 50 "Stump" (granted 2026-09-22, branch `tools`, plan + ledger `extensions/sketch/STUMP_PLAN.md` — ✅ COMPLETE + FROZEN 2026-09-23 on the user's six Nomad walks; g-paper `smudge-tool` merged to g-paper `main` and deleted):** the sketch face's smudge **follows the hand** (g-paper Phase 45 → **0.1.60**: the blend's box turned to the batch's principal axis, quantized to the lattice's four and run separably, **one-sided and travel-gated**, `RasterSmudging.across` 4, `loss` 0) and a **stylus Smudge tool** (`Tool.SMUDGE`, `smudgeToolRadius` 24 px; tip-switch chatter at stump pressure answered by a deferred window mirror + chatter-merged undo entries; **the sketch save has a deadline** — `SketchSaveCadence`, 15 s of unsaved work at most, follow-ups through the debounce; `btnSmudge` after the rubber on the sketch face, `PaperToolbar.btnSmudge`, `CollapsedTools.ORDER` with SMUDGE after ERASER, Tabler `hand-finger` as `ic_smudge`) — the finger rub of arc 48 stays under every tool; amends arc 48's decision 3 by addition. `:sn-screen` pinned 0.1.60. No seam change.
+
+**Arc 49 "Panel" (granted 2026-09-22, branch `tools`, plan + ledger `PANEL_INK_PLAN.md` — **P0
+BUILT 2026-09-22** (g-paper Phase 42 → 0.1.56 on `panel-ink`, mavenLocal, demo on the Nomad) and
+**P1 COMPLETE 2026-09-22 on the user's Nomad hand walk** (`:sn-screen` pinned 0.1.56,
+`NotebookActivity` sets `paper.directInk = true`, exclusion audit clean); **P2 COMPLETE 2026-09-22 on the user's Nomad walk**
+(pad + calendar + event note set `directInk = true`); **P3 COMPLETE 2026-09-22 on the user's Nomad walk (the sticky editor sets `directInk = true`, audit clean); **P4 (greys) COMPLETE 2026-09-22 on the user's Nomad walk, P5 FROZEN the same day — ARC 49 COMPLETE + FROZEN; `PaletteBar` / `ShadeIcon` / the tones (`core/InkTones`) into `:sn-screen`, the shade panel on every writing face's pen re-tap, one device-wide level in the host's `PenShadePrefs` carried to the pad and the calendar as `EXTRA_PEN_SHADE` on the launch and result Intents (the chrome flag's shape, no API bump), exports `ARGB_8888`; the first walk's crash was a 15 s ANR in the scribble-erase hit test at a long squiggle's pen-up, g-paper Phase 44 → 0.1.59 `PolylineIndex`, `:sn-screen` re-pinned; g-paper `panel-ink` (Phases 42–44) merged to g-paper `main` 2026-09-22 and deleted, SN `tools` merged to `main` 2026-09-24; no new arc without a user decision****): the vector-ink writing faces (notebook, pad, calendar, event note, sticky editor)
+go direct to the Supernote panel the way the sketch face does — g-paper **Phase 42 "Ink on the
+panel"** (branch `panel-ink` → 0.1.56, a `directInk` opt-in, the committed picture as the flatten
+base, an app-painted lasso trail, the daemon as fallback), then each face opts in on its own walk,
+then **sixteen greys return to the pen's re-tap** (the user's reversal of R3's shade removal), one
+device-wide shade, `ARGB_8888` exports. Ten locked decisions in the plan's § 2; the phases P0–P5
+in § 3. Fable writes it all, no subagents. **P0–P3 are complete — every writing face is on the panel; post-P3 the lasso eraser's trail is an x-stream again (g-paper Phase 43 → 0.1.58 after the first walk tightened the x pitch 16 → 10 px, `:sn-screen` pinned, COMPLETE on the user's Nomad walk); read the plan's ledger; P4 (the
+greys) COMPLETE on the user's Nomad walk and the arc FROZEN 2026-09-22 — read the plan's ledger.**
+The same day's icon swap (bfabaf83): `ic_pen` is Tabler's ballpen everywhere a pen is meant,
+`ic_pencil` the sketch face's pencil, `ic_pencil_down` → `ic_pen_down`.
 
 **Maintenance protocol (replaces the per-arc phase protocol):**
 
@@ -481,8 +529,10 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   the sixteenth
   module, and the
   second at the monorepo root, `extensions/sketch/`, included by `projectDir`):
-  `:extension-api` + `:sn-screen` + `:ext-ink`, **never** `:app`. Declares `API_VERSION` **20**
-  since arc 45 / G3 (19 at arc 44 / T2–T3, 18 at K5b, 17 at K2, the point's birth floor).
+  `:extension-api` + `:sn-screen` + `:ext-ink`, **never** `:app`. Declares `API_VERSION` **21**
+  since arc 46 / Q1 (20 at arc 45 / G3, 19 at arc 44 / T2–T3, 18 at K5b, 17 at K2, the point's
+  birth floor) — 21 = `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE`, the parcel tail
+  carrying the gel pen's remembered shade.
   `SketchContract.MIN_API_VERSION_FOR_SKETCH` **moved from its birth 17 to 20 at arc 45 / G2** —
   the point's own chunk calls changed shape in place, so a pre-20 sketch extension or host never
   binds a 20 one on the other side; `MIN_API_VERSION_FOR_SKETCH_PAGES` = 18 and
@@ -856,8 +906,12 @@ deps without discussion, no Material Components, no `runBlocking` on main, `Slog
   (no legacy, no shipped library on the old shape); `MIN_API_VERSION_FOR_SKETCH_PAGES` 18 and
   `MIN_API_VERSION_FOR_SKETCH_TOOLS` 19 stay where they were minted, both now inert below the
   action floor. `:ext-sketch` redeclares 20 as of arc 45 / G3 (2026-09-18) — its manifest still
-  said 19 between G2 and G3, a build not installed. Not an eleventh point. No action floor moved
-  at any of the other seven bumps
+  said 19 between G2 and G3, a build not installed. Not an eleventh point. · **21 = arc 46
+  "Palette" / Q1 (2026-09-19)**: a compatible tail on a **parcel**, not a method —
+  `SketchToolSettings` grows a fourth `int`, `penShade` (the gel pen's own remembered shade), read
+  with the exhausted-parcel rule; `SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE` 21 names
+  it, `MIN_API_VERSIONS` untouched, the action floor still 20, only `:ext-sketch` redeclares. No
+  action floor moved at any of the other eight bumps
   from 12 on; the pin
   lives in
   `ExtensionContractTest`, which **must be run** (`:extension-api:testDebugUnitTest`) at every

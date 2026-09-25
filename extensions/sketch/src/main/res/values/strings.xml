@@ -13,19 +13,15 @@
     <string name="cd_tool_pencil">Pencil</string>
     <string name="cd_tool_pen">Pen</string>
     <string name="cd_tool_eraser">Eraser</string>
+    <string name="cd_tool_smudge">Smudge</string>
     <string name="cd_sketch_bring_ink">Bring in ink</string>
     <string name="cd_sketch_show_pages">Show pages</string>
     <string name="cd_prev_page">Previous page</string>
     <string name="cd_next_page">Next page</string>
     <string name="sketch_page_indicator">%1$d / %2$d</string>
 
-    <!-- PencilBar (arc 44 / T3) — the pencil's own options bar, hung under the armed Pencil button
-         on a re-tap: 15 grey shade swatches (black is its own row, the other 14 numbered) over a
-         row of 5 sizes. -->
-    <string name="cd_pencil_shade_black">Black</string>
-    <string name="cd_pencil_shade_white">White</string>
-    <string name="cd_pencil_shade">Shade %1$d</string>
-    <string name="cd_pencil_size">Size %1$d</string>
+    <!-- The shade panel's swatch hints (cd_shade_black / cd_shade_white / cd_shade) come from
+         :sn-screen since arc 49 / P4, with PaletteBar itself. -->
 
     <!-- Problem dialogs — a tap that did nothing is never a toast on e-ink. -->
     <string name="sketch_not_saved_title">Sketch not saved</string>
@@ -48,6 +44,29 @@
     <string name="delete_page_body_both">Its handwriting and document will be deleted too.</string>
     <string name="sketch_page_failed_title">Page not changed</string>
     <string name="sketch_page_failed_body">Notesprout SN could not change the notebook\'s pages. Try again.</string>
+
+    <!-- The guides (arc 51 "Guides" / J3): one Guides button on the top bar, one panel under it.
+         Counts are numbers, not words, so they are not strings; the opacity latch is a format. -->
+    <string name="cd_sketch_guides">Guides</string>
+    <string name="guides_grid">Grid</string>
+    <string name="guides_grid_off">Off</string>
+    <string name="guides_grid_lines">Lines</string>
+    <string name="guides_grid_dots">Dots</string>
+    <string name="guides_show_grid">Show grid</string>
+    <string name="guides_hide_grid">Hide grid</string>
+    <string name="guides_reference">Reference</string>
+    <string name="guides_pick_image">Pick image</string>
+    <string name="guides_remove_image">Remove image</string>
+    <string name="guides_show_image">Show image</string>
+    <string name="guides_hide_image">Hide image</string>
+    <string name="guides_opacity">%1$d%%</string>
+    <string name="guides_no_picker_title">No image picker</string>
+    <string name="guides_no_picker_body">This device has no app for choosing an image.</string>
+    <string name="guides_image_not_saved_title">Reference image not saved</string>
+    <string name="guides_image_not_saved_body">Notesprout SN could not keep the reference image on this page. Try again.</string>
+    <string name="guides_image_not_removed_body">Notesprout SN could not remove the reference image from this page. Try again.</string>
+    <string name="guides_image_unreadable_body">That image could not be read. Pick a PNG, JPEG or WebP picture.</string>
+    <string name="guides_image_too_large_body">That image is too detailed to keep on a page. Pick a smaller or simpler picture.</string>
 
     <string name="sketch_host_gone_title">Sketch unavailable</string>
     <string name="sketch_host_gone_body">The notebook is no longer reachable. Go back and open the sketch again.</string>

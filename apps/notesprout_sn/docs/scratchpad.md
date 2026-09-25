@@ -80,10 +80,23 @@ pager, the inserts and the delete confirm, and the head of `consumeReceived`.
 |---|---|
 | Top bar | Back · Pen · Eraser · Lasso · "Scratch Pad" (centred on the screen) · **Send** (only with a notebook behind it) |
 | Bottom bar | ← · page indicator · → , centred on the screen |
-| Tools | **Fixed and they are the notebook's**: PEN, black, the notebook's pen width; the notebook's eraser radius. No panels, no colour, nothing remembered — a pad that lassoed differently one tap from the notebook would read as a bug. **Since arc 29 / LE3 the eraser has two kinds**, reached the notebook's way: a second tap on the armed eraser opens a Point · Lasso sub-bar (`EraserBar`, `:sn-screen`) rather than doing nothing; picking Lasso arms `Tool.LASSO_ERASER` (g-paper 0.1.28 — a closed loop erases everything it holds on the lasso's own hit rule), picking Point arms `Tool.ERASER` back. |
+| Tools | **Fixed and they are the notebook's**: PEN, the notebook's pen width, **in the device's shade since arc 49 / P4** (sixteen greys on the armed pen's re-tap — `:sn-screen`'s `PaletteBar`; the level arrives on the launch Intent as `EXTRA_PEN_SHADE` and goes home on the result, the chrome flag's shape; `InkScreenActivity.initPenShade` / `applyPenShade`); the notebook's eraser radius. No width or style panels — a pad that lassoed differently one tap from the notebook would read as a bug. **Since arc 29 / LE3 the eraser has two kinds**, reached the notebook's way: a second tap on the armed eraser opens a Point · Lasso sub-bar (`EraserBar`, `:sn-screen`) rather than doing nothing; picking Lasso arms `Tool.LASSO_ERASER` (g-paper 0.1.28 — a closed loop erases everything it holds on the lasso's own hit rule), picking Point arms `Tool.ERASER` back. |
 | Gestures | The notebook's, minus what the pad has no use for: 1-finger horizontal swipe = flip (past the last page, insert one) · 2-finger horizontal swipe = insert before / after · 2-finger stationary double-tap = undo · 3-finger = redo · 1-finger long-press = ask to delete this page. No link follow, no trail walk-back, no Contents, no Recents. |
 | Selection | Smart lasso + scribble erase, armed before the listener attaches. The floating bar is Send selection (with a notebook behind) then Delete — Delete last, as on the notebook's bar. |
 | Undo | Pad-level and **in memory**: it survives page turns and dies with the screen. |
+
+**The page is on the Supernote panel directly (arc 49 / P2, g-paper Phase 42 → 0.1.56).**
+`ScratchPadActivity` sets `paper.directInk = true` beside the two pen-gesture flags, before the
+listener attaches, so on Ratta the pad's page is painted the way the notebook's is since P1: the
+committed picture is the flatten base, the live pen, the point eraser and the lasso's dashed trail
+go to `/dev/ebc` from the app, nothing moves at pen-up, and the glass shows a blue-noise dither of
+the page while every send and export keeps its true greys. Where the panel refuses to open the page
+stays the ink daemon's with every overlay law intact — the flag is unconditional for that reason.
+Every panel post is cut around the exclusion rects, so `PaperChrome`'s list (both bars, the eraser
+sub-bar, the floating selection bar, the collapsed chrome) is what keeps a segment drawn up to a bar
+from writing page pixels over it; the `BLOCK_ALL` rect before the page is loaded clips every post
+entirely, and `loadCanvas` swaps it for the real chrome rects before the page's own whole-page
+present lands. No page-turn refresh, as on the notebook (the arc's decision 3).
 
 **Since arc 33 / F3 both bars are floating overlays over full-bleed paper** (they already were),
 and **a single-finger double-tap hides / shows both of them at once.** `InkScreenActivity.
@@ -318,7 +331,7 @@ page is clipped exactly like any other ink.
 and `onDrained` takes a list (the pad's is always one). Nothing else about the pad changed.
 
 1. The top bar's **Send** is the whole current page; the selection bar's **Send** is the lasso's
-   strokes. Both `ic_pencil_down`; both **absent** without a notebook behind the pad. An empty pick
+   strokes. Both `ic_pen_down`; both **absent** without a notebook behind the pad. An empty pick
    raises "Nothing to send" — never silence.
 2. The page is flushed under the page-op lock first (**the pad keeps its ink** — this is a copy), the
    chunks are parked in `ScratchSession`, and the screen finishes with `RESULT_SCRATCH_SEND`.

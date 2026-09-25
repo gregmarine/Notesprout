@@ -23,6 +23,16 @@ class SketchToolCodecTest {
     }
 
     @Test
+    fun `a missing pen shade is black, not nothing remembered`() {
+        // Arc 46 / Q1: the prefs file of a device upgraded from arc 44/45 has the trio and no
+        // fourth key — the parcel's exhausted-parcel rule, mirrored: the pen reads as black and the
+        // tool and pencil shade stay the person's own.
+        assertEquals(SketchToolSettings(SketchContract.TOOL_PEN, 3, 2, 0), SketchToolCodec.decode(SketchContract.TOOL_PEN, 3, 2))
+        assertEquals(SketchToolSettings(SketchContract.TOOL_PEN, 3, 2, 0), SketchToolCodec.decode(SketchContract.TOOL_PEN, 3, 2, null))
+        assertEquals(SketchToolSettings(SketchContract.TOOL_PEN, 3, 2, 11), SketchToolCodec.decode(SketchContract.TOOL_PEN, 3, 2, 11))
+    }
+
+    @Test
     fun `any missing value is nothing remembered`() {
         assertNull(SketchToolCodec.decode(null, 3, 2))
         assertNull(SketchToolCodec.decode(SketchContract.TOOL_PENCIL, null, 2))
@@ -39,6 +49,8 @@ class SketchToolCodecTest {
         assertNull(SketchToolCodec.decode(over, 0, 0))
         assertNull(SketchToolCodec.decode(0, over, 0))
         assertNull(SketchToolCodec.decode(0, 0, over))
+        assertNull(SketchToolCodec.decode(0, 0, 0, -1))
+        assertNull(SketchToolCodec.decode(0, 0, 0, over))
         assertNull(SketchToolCodec.decode(Int.MIN_VALUE, Int.MAX_VALUE, 0))
     }
 
@@ -46,7 +58,7 @@ class SketchToolCodecTest {
     fun `both ends of the sanity bound are legal`() {
         assertEquals(SketchToolSettings(0, 0, 0), SketchToolCodec.decode(0, 0, 0))
         val max = SketchContract.MAX_TOOL_SETTING_INDEX
-        assertEquals(SketchToolSettings(max, max, max), SketchToolCodec.decode(max, max, max))
+        assertEquals(SketchToolSettings(max, max, max, max), SketchToolCodec.decode(max, max, max, max))
     }
 
     /**

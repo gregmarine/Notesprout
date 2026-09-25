@@ -2,11 +2,14 @@ package com.symmetricalpalmtree.notesproutsn.notebook
 
 import com.symmetricalpalmtree.gpaper.core.model.Stroke
 import com.symmetricalpalmtree.notesproutsn.core.BoundedWait
+import android.util.Log
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SketchToolCodec
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SketchToolPrefs
 import com.symmetricalpalmtree.notesproutsn.extension.ExtensionContract
 import com.symmetricalpalmtree.notesproutsn.extension.SketchContract
+import com.symmetricalpalmtree.notesproutsn.extension.SketchGuideSettings
+import com.symmetricalpalmtree.notesproutsn.extension.SketchGuideState
 import com.symmetricalpalmtree.notesproutsn.extension.SketchHostBinder
 import com.symmetricalpalmtree.notesproutsn.extension.SketchHostSession
 import com.symmetricalpalmtree.notesproutsn.extension.SketchPageState
@@ -121,6 +124,25 @@ class SketchHostHooks(
      */
     @Volatile
     private var target: String? = null
+
+    /**
+     * Persist [target] as the notebook's last-opened page **now**, on every move the face makes
+     * (2026-09-19, the user's finding: a notebook killed by the system while the face was up
+     * reopened at the page the face *opened* at, not the one it was on). The host's own pointer
+     * writes run at the notebook screen's `onStop` and `close()` — and the screen is stopped for
+     * the whole life of the face, so a turn, an insert, a delete, an undo or a redo in the face
+     * moved [target] and nothing wrote it down until the face closed cleanly. Same row, same
+     * writer ([NotebookSession.saveLastOpened]); a failure here is a log line and never fails the
+     * move it follows.
+     */
+    private suspend fun rememberLastOpened(nb: NotebookSession) {
+        val id = target ?: return
+        try {
+            nb.saveLastOpened(id)
+        } catch (e: Exception) {
+            Log.w(TAG, "last-opened page not remembered: ${e.javaClass.simpleName}")
+        }
+    }
 
     /** The page the face is on — the screen's saved state, its catch-up on close, and the page the
      *  seal's cover is drawn from (decision 6). */
@@ -256,6 +278,7 @@ class SketchHostHooks(
             val newIndex = DocumentTargetRules.flipIndex(index, direction, pages.size) ?: index
             val state = state(session, nb, newIndex)
             target = pages[newIndex].id
+            rememberLastOpened(nb)
             state
         }
     }
@@ -357,6 +380,7 @@ class SketchHostHooks(
             structuralChanged = true
             onStructural(snap)
             target = nb.currentPage.id
+            rememberLastOpened(nb)
             Slog.d(TAG) { "insertPage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
             state(session, nb, nb.currentIndex, token)
         }
@@ -389,6 +413,7 @@ class SketchHostHooks(
             structuralChanged = true
             onStructural(snap)
             target = nb.currentPage.id
+            rememberLastOpened(nb)
             Slog.d(TAG) { "deletePage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
             state(session, nb, nb.currentIndex, token)
         }
@@ -447,6 +472,7 @@ class SketchHostHooks(
             structuralChanged = true
             onStructuralUndone(snap)
             target = nb.currentPage.id
+            rememberLastOpened(nb)
             Slog.d(TAG) { "undoPage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
             state(session, nb, nb.currentIndex)
         }
@@ -468,6 +494,7 @@ class SketchHostHooks(
             structuralChanged = true
             onStructuralRedone(snap)
             target = nb.currentPage.id
+            rememberLastOpened(nb)
             Slog.d(TAG) { "redoPage($token): ${nb.pages.size} pages, target at ${nb.currentIndex}" }
             state(session, nb, nb.currentIndex)
         }
@@ -488,6 +515,45 @@ class SketchHostHooks(
     /** Remember the face's pick. Fire-and-forget by nature — `apply()` is asynchronous — and pushed
      *  at every pick, so the value that survives a process death is the last one chosen. */
     override fun putToolSettings(settings: SketchToolSettings) = toolPrefs.put(settings)
+
+    // ── Guides (arc 51 / J2) ───────────────────────────────────────────────
+
+    /**
+     * The guides of the live page [pageKey] names — **any** live page, not only the target (the
+     * face asks for the page it has just loaded). The writer is drained first for [requestInk]'s
+     * reason: a guide push a moment ago is a queued write, and a state that missed it would hand
+     * the face back what the person has just changed. The image bytes are parked in the guide
+     * window and the state is built from that call's answer — window and state together, the
+     * contract's atomicity.
+     */
+    override fun guides(session: SketchHostSession, pageKey: String): SketchGuideState = runBlocking {
+        withContext(Dispatchers.IO) {
+            val nb = openSession()
+            require(nb.pages.any { it.id == pageKey }) { "Unknown page" }
+            nb.store.drain()
+            val guides = nb.readGuides(pageKey) ?: throw IllegalArgumentException("Unknown page")
+            val bytes = guides.imageBytes ?: ByteArray(0)
+            val chunks = session.setGuideWindow(pageKey, bytes)
+            SketchGuideState(pageKey, guides.settings, bytes.size, chunks)
+        }
+    }
+
+    /** Keep the face's guide settings for [pageKey] — through the session's writer and awaited
+     *  ([NotebookSession.putGuides]); a page that is not live is `IllegalArgumentException`. */
+    override fun putGuides(pageKey: String, settings: SketchGuideSettings) = runBlocking {
+        withContext(Dispatchers.IO) {
+            openSession().putGuides(pageKey, settings)
+        }
+    }
+
+    /** A completed guide-image save, [commit]'s shape exactly: through the writer and awaited
+     *  ([NotebookSession.writeGuideImage]), the page size the notebook's own, the two typed
+     *  refusals out with nothing written, empty bytes Remove. */
+    override fun commitGuideImage(commit: SketchHostSession.GuideCommit) = runBlocking {
+        withContext(Dispatchers.IO) {
+            openSession().writeGuideImage(commit.pageKey, commit.bytes)
+        }
+    }
 
     /** Where the face is, as an index into [NotebookSession.pages] — the same resolve the two
      *  window-loading hooks run, so a target that has vanished falls back to the displayed page

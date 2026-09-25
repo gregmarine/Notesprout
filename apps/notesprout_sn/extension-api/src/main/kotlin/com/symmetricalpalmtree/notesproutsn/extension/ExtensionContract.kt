@@ -175,8 +175,27 @@ object ExtensionContract {
      * never binds a 19 host. Granted by the user's decision 4 — no legacy, no shipped library on
      * the old shape. Every other point's floor is untouched; the two sketch method floors (18, 19)
      * sit below the action floor and are inert. Not an eleventh point; only `:ext-sketch` declares.
+     *
+     * **21 = arc 46 "Palette" / Q1 (2026-09-19)** — one compatible tail on a **parcel**, not a
+     * method: [SketchToolSettings] grows a fourth `int`, `penShade` (the gel pen takes the same
+     * sixteen-shade choice as the pencil — the user's decision 3), read with the exhausted-parcel
+     * rule, named by [SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE]. The `size` slot before
+     * it is dead (one pencil width now) and stays on the wire so nothing changes shape in place.
+     * `MIN_API_VERSIONS` is untouched, [SketchContract.MIN_API_VERSION_FOR_SKETCH] stays 20, no
+     * door vanishes, and only `:ext-sketch` redeclares. Not an eleventh point.
+     *
+     * **22 = arc 51 "Guides" / J1 (2026-09-23)** — four compatible tails on `ISketchHost` after
+     * `putToolSettings` (`guides` / `readGuideImageChunk` / `putGuides` / `saveGuideImageChunk`:
+     * a grid and a reference image lie under the sketch as tools, stored in the `.soil` as two
+     * rows parented to the page, never drawn into a raster, exported, covered or erased), behind
+     * the METHOD floor [SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES], with two new
+     * parcelables, [SketchGuideSettings] and [SketchGuideState], and a third read window plus a
+     * third accumulator host-side. T2's shape again: a screen that calls transaction codes 14–17
+     * declares 22 and never binds a 21 host. `MIN_API_VERSIONS` is untouched,
+     * [SketchContract.MIN_API_VERSION_FOR_SKETCH] stays 20, no door vanishes, and only
+     * `:ext-sketch` redeclares. Not an eleventh point.
      */
-    const val API_VERSION: Int = 20
+    const val API_VERSION: Int = 22
 
     /**
      * The floor for a service on a **store-taking** point (arc 22 / X1): the host accepts such a
@@ -560,6 +579,21 @@ object ExtensionContract {
      * nothing. The fifth boolean the calendar's launch Intent carries, the third the pad's.
      */
     const val EXTRA_CHROME_HIDDEN: String = "chromeHidden"
+
+    /**
+     * Int Intent extra on the scratch pad's and the calendar's screen (arc 49 / P4), **both
+     * directions** — [EXTRA_CHROME_HIDDEN]'s shape exactly, for the one other thing the person
+     * sets as a way of working on every paper screen: the **pen's shade**, as a level on the
+     * family's sixteen-tone ladder (0 = black … 15 = white; `:sn-screen`'s `InkTones`). On the
+     * launch Intent it is the level the host's paper screens are writing in (absent = black); on
+     * the result Intent it is the level the screen was left on, whatever the result code. The host
+     * persists it; the extension writes nothing to disk. **The first integer on this seam's
+     * Intents**, and still no content, no id, no path, no secret: a level names a grey and nothing
+     * else, and one this build does not offer reads as black on either side. No version gate and
+     * no floor: an extension that predates it ignores the launch extra and returns a result
+     * without it, and the host writes nothing.
+     */
+    const val EXTRA_PEN_SHADE: String = "penShade"
 
     // ── Calendar render (arc 31 / HV4 — under API 9, a method floor, not a point) ──────
     // `ICalendar.render` writes a `PageBundle` v1 of calendar pages (grid · ink · today ring ·

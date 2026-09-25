@@ -1,6 +1,8 @@
 package com.symmetricalpalmtree.notesproutsn.extension;
 
 // A .aidl that takes a parcelable needs an explicit import for it.
+import com.symmetricalpalmtree.notesproutsn.extension.SketchGuideSettings;
+import com.symmetricalpalmtree.notesproutsn.extension.SketchGuideState;
 import com.symmetricalpalmtree.notesproutsn.extension.SketchPageState;
 import com.symmetricalpalmtree.notesproutsn.extension.SketchToolSettings;
 import com.symmetricalpalmtree.notesproutsn.extension.WireStroke;
@@ -201,4 +203,53 @@ interface ISketchHost {
      * or the widths they name.
      */
     void putToolSettings(in SketchToolSettings settings);
+
+    /**
+     * Arc 51 "Guides" / J1 (2026-09-23) -- a compatible tail (the fourteenth method, transaction
+     * code 14) behind the extension-side declaration floor
+     * SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES (22): the page [pageKey] names' GUIDES --
+     * its grid settings and, parked in the host's third read window (the guide window, beside the
+     * two raster windows), its reference image -- a lossy WebP with alpha of exactly the page's
+     * size, or absent (0 bytes, one chunk). Any LIVE page of the open notebook may be asked; a key
+     * naming a page the notebook no longer has is an IllegalArgumentException. The guide window
+     * is loaded atomically with the answer and is untouched by current() / requestPage().
+     *
+     * Guides are TOOLS, never marks (the user's decision): the host stores them as two rows
+     * parented to the page (`guide_grid`, `guide_image`) that it never draws, exports, covers or
+     * erases, and that page copy / delete / undo carry with the page.
+     */
+    SketchGuideState guides(String pageKey);
+
+    /**
+     * J1 -- a compatible tail (the fifteenth method, transaction code 15) behind the same floor:
+     * one chunk of the guide read window, 0-based; outside 0..(the chunk count guides() answered)-1
+     * is refused. An absent image is one empty chunk.
+     */
+    byte[] readGuideImageChunk(int chunkIndex);
+
+    /**
+     * J1 -- a compatible tail (the sixteenth method, transaction code 16) behind the same floor:
+     * the page [pageKey] names' guide SETTINGS, replacing whatever was kept -- five small ints,
+     * indices and a percent, never pixels. GRID_OFF soft-deletes the page's grid row; any other
+     * kind upserts it. The image's two fields are written to the image row if one is live and are
+     * otherwise IGNORED: a freshly saved image row starts at opacity 0, and the face pushes its
+     * settings right after the image lands (save, then put — J2's recorded order). The face pushes at every pick, so
+     * the value that survives a process death is the last one the person chose. A null is an
+     * IllegalArgumentException; an out-of-bounds field never arrives (the constructor refuses it).
+     */
+    void putGuides(String pageKey, in SketchGuideSettings settings);
+
+    /**
+     * J1 -- a compatible tail (the seventeenth method, transaction code 17) behind the same floor:
+     * one chunk of a save of the page [pageKey] names' reference image -- saveSketchChunk's rules
+     * exactly, on the guide accumulator (independent of both raster accumulations): chunks in
+     * order from 0, the running total re-checked against SketchContract.MAX_BYTES (over it:
+     * IllegalStateException carrying exactly SKETCH_TOO_LARGE, the guide accumulation reset,
+     * nothing written), [last] commits, and the committed bytes are checked against the page's
+     * size before any decode (IllegalStateException carrying exactly SKETCH_BAD_IMAGE). ONE EMPTY
+     * CHUNK with last = true is "remove the image": the host soft-deletes the image row. The
+     * extension pushes one image per pick under its own push lock, never interleaved with a
+     * second guide stream.
+     */
+    void saveGuideImageChunk(String pageKey, int chunkIndex, in byte[] chunk, boolean last);
 }

@@ -140,9 +140,10 @@ internal object PdfAssembly {
     /** Decode → re-encode → attach to the document → recycle. Nothing survives this call but the
      *  page's compressed JPEG stream inside [document]. */
     private fun addPage(document: PDDocument, page: PageBundle.Page, number: Int, count: Int) {
-        // The host bakes opaque RGB_565 pages (the F5 recipe) — asking for the config the bytes
-        // already are halves the decode's footprint and loses nothing.
-        val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 }
+        // The host bakes opaque ARGB_8888 pages since arc 49 / P4 (RGB_565 until then, the F5
+        // recipe): the pen writes in sixteen greys, and a 5/6-bit decode here would round them a
+        // second time on the way into the document. Opaque still — the JPEG below has no alpha.
+        val options = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
         val bitmap = BitmapFactory.decodeByteArray(page.image, 0, page.image.size, options)
             ?: throw IllegalStateException("page $number of $count did not decode")
         val jpeg: ByteArray

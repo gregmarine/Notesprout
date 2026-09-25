@@ -17,6 +17,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.CompletableDeferred
 
 /**
  * The plumbing half of a sketch page's saves (arc 43 / K5; **per raster since arc 45 "Ink" / G3**):
@@ -105,6 +107,13 @@ class SketchSaver(
     private var debounce: Job? = null
     private var retry: Job? = null
 
+    /** When the page first became dirty since its last copy (uptime ms), or 0 — the deadline's
+     *  anchor ([SketchSaveCadence]). Main thread. */
+    private var dirtySince = 0L
+
+    /** A save past its deadline waiting for the next pen lift — completed by [notePenLifted]. */
+    private var penLift: CompletableDeferred<Unit>? = null
+
     /** Whether **either** raster on the glass holds something the host has not been given. */
     val isDirty: Boolean get() = governors.values.any { it.dirty }
 
@@ -116,15 +125,40 @@ class SketchSaver(
     /** A page was just loaded: what is on the glass is what is on disk — **both** rasters. */
     fun markClean() {
         for (g in governors.values) g.markClean()
+        dirtySince = 0L
     }
 
-    /** Restart the idle timer; a burst of marks coalesces into one write. */
+    /** The pen left the paper — a save past its deadline copies here, between strokes. */
+    fun notePenLifted() {
+        penLift?.complete(Unit)
+    }
+
+    /**
+     * Restart the idle timer; a burst of marks coalesces into one write — **up to the deadline**
+     * ([SketchSaveCadence], arc 50 walk 4): from the first unsaved change the page has
+     * [SketchSaveCadence.MAX_DIRTY_MS] before a save goes ahead whether or not the hand has paused.
+     * Before it, the debounce and the pen-idle gate as always; past it, the gate is bounded — the
+     * pen going idle, else the next pen lift, else the copy regardless.
+     */
     fun schedule() {
         if (leaving) return
+        val now = SystemClock.uptimeMillis()
+        if (dirtySince == 0L) dirtySince = now
+        val since = dirtySince
         debounce?.cancel()
         debounce = scope.launch(Dispatchers.Main) {
-            delay(SAVE_DEBOUNCE_MS)
-            awaitPenIdle()
+            delay(SketchSaveCadence.debounceWait(since, now))
+            if (!SketchSaveCadence.pastDeadline(since, SystemClock.uptimeMillis())) {
+                awaitPenIdle()
+            } else {
+                val idle = withTimeoutOrNull(SketchSaveCadence.IDLE_LIMIT_MS) { awaitPenIdle() }
+                if (idle == null) {
+                    val lift = CompletableDeferred<Unit>().also { penLift = it }
+                    val lifted = withTimeoutOrNull(SketchSaveCadence.LIFT_LIMIT_MS) { lift.await() }
+                    penLift = null
+                    Slog.d(TAG) { "save past its deadline: ${if (lifted == null) "copying under the pen" else "copying at the pen lift"}" }
+                }
+            }
             saveNow()
         }
     }
@@ -133,6 +167,7 @@ class SketchSaver(
     fun cancelTimers() {
         debounce?.cancel(); debounce = null
         retry?.cancel(); retry = null
+        penLift = null
     }
 
     /**
@@ -143,6 +178,7 @@ class SketchSaver(
     fun saveNow() {
         if (leaving) return
         cancelTimers()
+        dirtySince = 0L
         val key = pageKey ?: return
         for (layer in SketchLayers.all) {
             if (governor(layer).request() is SketchSaveGovernor.SaveAction.Save) startPush(key, layer)
@@ -200,8 +236,15 @@ class SketchSaver(
             return
         }
         if (governor(layer).onSaved() !is SketchSaveGovernor.SaveAction.Save) return
-        val next = pageKey
-        if (leaving || next == null) governor(layer).onCopyFailed() else startPush(next, layer)
+        // A mark arrived during the push. It used to be written the instant this one landed —
+        // harmless while saves only ever began at idle, but with the deadline (arc 50, walk 4) a
+        // save can begin mid-work, and then the follow-ups chained at the encoder's own rate, a
+        // 3–4 s lossless encode back to back for as long as the hand kept going (fifteen in one
+        // minute on the Nomad). So the mark is put back as owed (`onCopyFailed`: still owed,
+        // nothing in flight) and the next save goes through the debounce and the deadline like
+        // any other; every flush point still finds it.
+        governor(layer).onCopyFailed()
+        if (!leaving && pageKey != null) schedule()
     }
 
     /**
@@ -370,6 +413,34 @@ class SketchSaver(
         runBlocking { pushLock.withLock { pushChunks(pageKey, layer, bytes) } }
     }
 
+    // ── The reference image (arc 51 "Guides" / J3) ───────────────────────────
+
+    /**
+     * Push a page's **reference image** — or, with an empty [bytes], remove it — under **the one
+     * push lock** every raster save takes, so a guide stream is FIFO with the raster streams and
+     * never interleaved with one (the host's accumulators are independent, but the lock is the
+     * face's promise of one stream on the wire at a time).
+     *
+     * **Not debounced, not parked, not retried**: one push per pick, and a failure is the caller's
+     * to say out loud (a problem dialog, never a toast). The picture is still on the person's device
+     * — unlike a sketch's pixels, this is never the only copy — so nothing is held for `end()`.
+     * Returns the failure, or null. Off the main thread by construction.
+     */
+    suspend fun pushGuideImage(pageKey: String, bytes: ByteArray): Throwable? = withContext(Dispatchers.IO) {
+        try {
+            pushLock.withLock {
+                val host = SketchSession.host ?: throw IllegalStateException("no showing")
+                GuidePush.push(host, pageKey, bytes)
+            }
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            Log.w(TAG, "the reference image (${bytes.size} B) could not be pushed: ${t.javaClass.simpleName}")
+            t
+        }
+    }
+
     // ── The push ──────────────────────────────────────────────────────────────
 
     /** The copy, taken on Main, and how long taking it cost. A null bitmap is a blank raster, which
@@ -469,9 +540,9 @@ class SketchSaver(
     companion object {
         private const val TAG = "SketchSaver"
 
-        /** Quiet time before a page is written — Paintsprout's three seconds, and its reason: a
-         *  rubbing sweep reports a change dozens of times a second and a page encode is not cheap. */
-        const val SAVE_DEBOUNCE_MS = 3_000L
+        /** Quiet time before a page is written — [SketchSaveCadence.DEBOUNCE_MS], kept under its
+         *  old name for the callers and docs that know it. */
+        const val SAVE_DEBOUNCE_MS = SketchSaveCadence.DEBOUNCE_MS
 
         /** A failed push waits this long before trying again — the usual cause is a host that is
          *  restarting, and its `.soil` open is asynchronous. */

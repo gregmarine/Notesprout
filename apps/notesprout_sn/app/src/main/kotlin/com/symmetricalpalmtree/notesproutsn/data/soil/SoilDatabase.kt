@@ -39,6 +39,10 @@ abstract class SoilDatabase : RoomDatabase() {
      *  entity set is what Room hashes, so this adds no schema drift and needs no migration. */
     abstract fun sketchDao(): SketchDao
 
+    /** The `guide_grid` / `guide_image` rows' own queries (arc 51 / J2). A fourth DAO over the same
+     *  one entity — no schema drift, no migration. */
+    abstract fun guideDao(): GuideDao
+
     /** The raw connection, for `notebook_meta` and PRAGMAs. */
     fun raw(): SupportSQLiteDatabase = openHelper.writableDatabase
 

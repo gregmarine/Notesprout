@@ -14,6 +14,7 @@ import com.symmetricalpalmtree.notesproutsn.core.OpeningOverlay
 import com.symmetricalpalmtree.notesproutsn.core.RecognizingOverlay
 import com.symmetricalpalmtree.notesproutsn.core.Slog
 import com.symmetricalpalmtree.notesproutsn.data.prefs.ChromePrefs
+import com.symmetricalpalmtree.notesproutsn.data.prefs.PenShadePrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.Surface
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SurfaceEntry
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SurfaceStack
@@ -190,6 +191,10 @@ open class ExtensionScreenEntry<I : Any, P>(
     /** The one global chrome flag (arc 33 / F3) — out on the launch Intent, back off the result. */
     private val chromePrefs = ChromePrefs(activity)
 
+    /** The one device-wide pen shade (arc 49 / P4) — the chrome flag's shape: out on the launch
+     *  Intent, back off the result, persisted here so the host screen's `onResume` re-arms from it. */
+    private val penShadePrefs = PenShadePrefs(activity)
+
     /**
      * One token per **entry instance**, not per surface: a host holds one entry per door for its
      * whole life, and it can raise its screen many times — the same token each time is exactly
@@ -268,6 +273,8 @@ open class ExtensionScreenEntry<I : Any, P>(
                 decorateIntent(activity, provider, intent)
                 // Arc 33 / F3: the screen opens in the chrome state the person is working in.
                 intent.putExtra(ExtensionContract.EXTRA_CHROME_HIDDEN, chromePrefs.hidden)
+                // Arc 49 / P4: …and writing in the shade they are writing in.
+                intent.putExtra(ExtensionContract.EXTRA_PEN_SHADE, penShadePrefs.level)
                 if (send != null && !handOver(fresh, send)) return@launch
                 // The pipeline goes over the instant before the launch, and not one step earlier:
                 // until here the open could still have failed and left this screen writing. The
@@ -353,6 +360,9 @@ open class ExtensionScreenEntry<I : Any, P>(
         // and the host's `onResume` re-syncs from it. Absent (a dead process, an older extension)
         // writes nothing: the flag the person set stands.
         ChromeResult.read(result.data)?.let { chromePrefs.hidden = it }
+        // Arc 49 / P4, the same synchronous rule: the shade the screen left its pen on is the
+        // device's before the host's `onResume` re-arms its own pen from it. Absent writes nothing.
+        PenShadeResult.read(result.data)?.let { penShadePrefs.level = it }
         val open = client
         client = null
         Slog.d(tag) { "screen returned: resultCode=${result.resultCode}" }

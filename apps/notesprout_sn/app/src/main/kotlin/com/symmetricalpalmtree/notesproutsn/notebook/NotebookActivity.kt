@@ -57,7 +57,9 @@ import com.symmetricalpalmtree.notesproutsn.data.prefs.SurfaceEntry
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SurfaceStack
 import com.symmetricalpalmtree.notesproutsn.data.prefs.LinkTrail
 import com.symmetricalpalmtree.notesproutsn.data.prefs.RecentsPrefs
+import com.symmetricalpalmtree.notesproutsn.core.InkTones
 import com.symmetricalpalmtree.notesproutsn.data.prefs.ChromePrefs
+import com.symmetricalpalmtree.notesproutsn.data.prefs.PenShadePrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SketchToolPrefs
 import com.symmetricalpalmtree.notesproutsn.data.prefs.SnapPrefs
 import com.symmetricalpalmtree.notesproutsn.databinding.ActivityNotebookBinding
@@ -182,6 +184,14 @@ class NotebookActivity : AppCompatActivity() {
      *  eraser. `:sn-screen`'s, because all four paper surfaces share the one bar. */
     private lateinit var eraserBar: EraserBar
 
+    /** The pen's shade panel (arc 49 / P4) — `:sn-screen`'s bar, hung under the armed pen button
+     *  on its re-tap; the eraser sub-bar's arrangement in every particular. */
+    private lateinit var paletteBar: PaletteBar
+
+    /** The one device-wide pen shade (arc 49 / P4, decision 6) — read at open and at every resume
+     *  (another paper screen may have picked while this one was away), written at every pick. */
+    private lateinit var penShadePrefs: PenShadePrefs
+
     /** The shape transform mode's floating bar (arc 28 / H4) — up only while
      *  `paper.transformingContentId != null`, torn down by the one `onTransformEnded`. */
     private lateinit var transformBar: ShapeTransformBar
@@ -304,7 +314,7 @@ class NotebookActivity : AppCompatActivity() {
             hideLassoPopup()
             hideTagsPopup()
             hideInsertBar()
-            hideEraserBar()
+            hideEraserBar(); hidePaletteBar()
         }
         override fun launchEditor(intent: Intent) = stickyEditorLauncher.launch(intent)
         override fun syncClipboardMark() {
@@ -666,6 +676,15 @@ class NotebookActivity : AppCompatActivity() {
         // because the engine reads them as it wires itself up. Order is load-bearing.
         paper.smartLassoEnabled = true
         paper.scribbleEraseEnabled = true
+        // Arc 49 / P1: the notebook page goes direct to the Supernote panel the way the sketch
+        // face does (g-paper Phase 42) — the committed picture is the flatten base, the live pen,
+        // the point eraser and the lasso's trail are painted by the app, the glass shows a dither
+        // of the page and exports keep their greys. Where the panel refuses to open the page
+        // stays the ink daemon's with every overlay law intact, so this is set unconditionally.
+        // Every panel post is cut around the exclusion rects, which is why pushExclusions() must
+        // keep listing every floating bar and popup: a post under a bar would paint page pixels
+        // over it until the compositor's next frame.
+        paper.directInk = true
         // Snap-to-guide (arc 9): the margin guides are one toolbar thick, so content snapped to a
         // page margin lands exactly where the chrome ends. Armed from the remembered preference —
         // the toggle lives on the selection bar, but the setting outlives every selection. The
@@ -713,8 +732,12 @@ class NotebookActivity : AppCompatActivity() {
             onToolTapped = {
                 if (lassoPopup.isShowing) hideLassoPopup()
                 hideInsertBar()
-                hideEraserBar()
+                hideEraserBar(); hidePaletteBar()
+                hidePaletteBar()   // and the pen's shade panel, which belongs to the pen being left (arc 49 / P4)
             },
+            // Arc 49 / P4: a second tap on the armed pen opens its shade panel, a third closes it —
+            // the eraser sub-bar's toggle exactly.
+            onPenReTap = { if (paletteBar.isShowing) hidePaletteBar() else showPaletteBar() },
             // Arc 36: the collapsed chrome's corner button repaints with the bar — the one funnel
             // every tool change passes through (a tap, `arm`, `armLasso`, every by-hand sync,
             // `onToolChanged`), so no path can leave it wearing a tool that is no longer armed.
@@ -1103,7 +1126,7 @@ class NotebookActivity : AppCompatActivity() {
             // is a silent release and would take its geometry with it — H4), and only then does the
             // pipeline go over.
             beforeLaunch = {
-                hideLassoPopup(); hideTagsPopup(); hideInsertBar(); hideEraserBar(); dismissCollapsed()
+                hideLassoPopup(); hideTagsPopup(); hideInsertBar(); hideEraserBar(); hidePaletteBar(); dismissCollapsed()
                 endTransformIfRunning()
                 paper.releaseForHandoff()
             },
@@ -1160,8 +1183,26 @@ class NotebookActivity : AppCompatActivity() {
             anchor = binding.btnEraser,
             bandBottom = { chromeBand()?.last },
             paper = paper,
-            onPicked = { tool -> hideEraserBar(); toolbar.arm(tool) },
+            onPicked = { tool -> hideEraserBar(); hidePaletteBar(); toolbar.arm(tool) },
         )
+        // The pen's shade panel (arc 49 / P4, the user's decisions 4–6 — R3's sixteen greys back,
+        // for the shade alone) — the eraser sub-bar's recipe hung under the pen button instead,
+        // opened only by that button's own re-tap. A pick arms the pen, wears the tone on every
+        // glyph that shows it and remembers the level for every paper screen on the device; the
+        // bar stays open after a pick (its own rule). The level is read here once and again at
+        // every resume, because the pad, the calendar and the sticky editor pick into the same
+        // prefs.
+        penShadePrefs = PenShadePrefs(this)
+        paletteBar = PaletteBar(
+            root = binding.root,
+            bar = binding.paletteBar,
+            anchor = binding.btnPen,
+            bandBottom = { chromeBand()?.last },
+            paper = paper,
+            armedLevel = { penShadePrefs.level },
+            onPicked = { level -> penShadePrefs.level = level; applyPenShade() },
+        )
+        applyPenShade()
         binding.btnInsert.setOnClickListener {
             if (!opened || closing) return@setOnClickListener
             if (insertBar.isShowing) hideInsertBar() else showInsertBar()
@@ -1232,12 +1273,19 @@ class NotebookActivity : AppCompatActivity() {
                 CollapsedChrome.Entry.mirroring(R.drawable.ic_calendar, binding.btnCalendar),
                 CollapsedChrome.Entry.mirroring(R.drawable.ic_sketching, binding.btnScratchPad),
             ),
-            onOpen = { endTransformIfRunning(); hideLassoPopup(); hideTagsPopup(); hideInsertBar(); hideEraserBar() },
-            // The two sub-bars hung off the rows go with them, by every path a row can close —
+            onOpen = { endTransformIfRunning(); hideLassoPopup(); hideTagsPopup(); hideInsertBar(); hideEraserBar(); hidePaletteBar() },
+            // The three sub-bars hung off the rows go with them, by every path a row can close —
             // raw hides: the one exclusion push follows in `onChanged`.
-            onClose = { insertBar.hide(); tagsPopup.hide() },
+            onClose = { insertBar.hide(); tagsPopup.hide(); paletteBar.hide() },
             onArmed = { toolbar.arm(it) },
             onChanged = ::pushExclusions,
+            // Arc 49 / P4: the mini toolbar's pen wears the shade as the bar's does (the ARGB is
+            // the token), and its re-tap hangs the shade panel under the row's own button.
+            penIcon = {
+                val ink = toolbar.penInk
+                CollapsedChrome.PenIcon(ink) { ShadeIcon.pen(this, ink) }
+            },
+            onPenReTap = { anchor -> if (paletteBar.isShowing) hidePaletteBar() else showPaletteBar(anchor) },
         )
         chromeToggle = ChromeToggle(
             paper = paper,
@@ -1246,7 +1294,7 @@ class NotebookActivity : AppCompatActivity() {
             // The corner button is about to appear: it is made honest here, where the tool it must
             // wear is whatever the bar last armed — a host-set tool (a bar tap, an eraser sub-bar
             // pick) is never echoed back as `onToolChanged` (arc 36 / C2).
-            beforeHide = { hideLassoPopup(); hideTagsPopup(); hideInsertBar(); hideEraserBar() },
+            beforeHide = { hideLassoPopup(); hideTagsPopup(); hideInsertBar(); hideEraserBar(); hidePaletteBar() },
             afterLayout = ::pushExclusions,
             onChanged = { chromePrefs.hidden = it },
             whileHidden = listOf(binding.collapsedKnob),
@@ -2623,7 +2671,7 @@ class NotebookActivity : AppCompatActivity() {
         hideLassoPopup()          // it belongs to the page being left, like every other floating bar
         hideTagsPopup()           // and its Tag page door would now aim at a page nobody chose
         hideInsertBar()           // whatever it would place belongs to the page being left
-        hideEraserBar()           // and the eraser's own sub-bar goes with every other floating bar
+        hideEraserBar(); hidePaletteBar()           // and the eraser's own sub-bar goes with every other floating bar
         dismissCollapsed()        // arc 36: the mini toolbar's rows too
         paper.clearForContentSwap()
         paper.setPageSize(page.width, page.height)
@@ -3842,7 +3890,7 @@ class NotebookActivity : AppCompatActivity() {
             .addAction(R.drawable.ic_plus, getString(R.string.scratch_placement_new_page)) {
                 openPadWith(strokes, page, ExtensionContract.PLACEMENT_NEW_PAGE)
             }
-            .addAction(R.drawable.ic_pencil_down, getString(R.string.scratch_placement_current_page)) {
+            .addAction(R.drawable.ic_pen_down, getString(R.string.scratch_placement_current_page)) {
                 openPadWith(strokes, page, ExtensionContract.PLACEMENT_CURRENT_PAGE)
             }
             .show()
@@ -4257,7 +4305,7 @@ class NotebookActivity : AppCompatActivity() {
         // Another bar taking this one's place ends the mode — the same rule the floating bars
         // already apply to each other, and the transform bar is one of them.
         endTransformIfRunning()
-        hideEraserBar()   // the newest tap wins, as it does between the other floating bars
+        hideEraserBar(); hidePaletteBar()   // the newest tap wins, as it does between the other floating bars
         if (lassoPopup.show()) pushExclusions()
     }
 
@@ -4279,7 +4327,7 @@ class NotebookActivity : AppCompatActivity() {
     private fun showTagsPopup(anchor: View? = null) {
         if (!opened || closing || !canvasShown) return
         endTransformIfRunning()
-        hideEraserBar()
+        hideEraserBar(); hidePaletteBar()
         hideInsertBar()   // arc 36: from the overflow row the contact that opens this is inside the collapsed chrome, which the Insert bar's own dismissal leaves alone
         if (tagsPopup.show(anchor)) pushExclusions()
     }
@@ -4303,7 +4351,7 @@ class NotebookActivity : AppCompatActivity() {
         endTransformIfRunning()
         hideLassoPopup()
         hideTagsPopup()
-        hideEraserBar()
+        hideEraserBar(); hidePaletteBar()
         if (insertBar.show(anchor)) pushExclusions()
     }
 
@@ -4350,6 +4398,42 @@ class NotebookActivity : AppCompatActivity() {
         if (!::eraserBar.isInitialized || !eraserBar.isShowing) return
         eraserBar.hide()
         pushExclusions()
+    }
+
+    // ── The pen's shade panel (arc 49 / P4) ──────────────────────────────────
+
+    /**
+     * Open the pen's shade panel under the pen button — or under [anchor], the mini toolbar's own
+     * pen button while the chrome is collapsed (the Insert bar's precedent: the bar's button is
+     * `GONE` and keeps stale edges). [showEraserBar]'s gates and dismissals exactly: the newest tap
+     * wins over every other floating bar, and it is **not** pen-idle gated — one chrome frame at a
+     * deliberate tap, with the pen that tapped it still hovering.
+     */
+    private fun showPaletteBar(anchor: View? = null) {
+        if (!opened || closing || !canvasShown) return
+        endTransformIfRunning()
+        hideLassoPopup()
+        hideTagsPopup()
+        hideInsertBar()
+        hideEraserBar()
+        val shown = if (anchor == null) paletteBar.show() else paletteBar.show(anchor)
+        if (shown) pushExclusions()
+    }
+
+    private fun hidePaletteBar() {
+        if (!::paletteBar.isInitialized || !paletteBar.isShowing) return
+        paletteBar.hide()
+        pushExclusions()
+    }
+
+    /**
+     * Arm the pen with the device's shade — at open, at every resume (the pad, the calendar and
+     * the sticky editor pick into the same prefs), and after a pick. The toolbar wears it and the
+     * collapsed chrome repaints from the toolbar's funnel; both are silent on a repeat.
+     */
+    private fun applyPenShade() {
+        toolbar.applyShade(InkTones.tone(penShadePrefs.level))
+        if (::collapsed.isInitialized) collapsed.sync()
     }
 
     /** A fresh `ic_sticker_2` for one renderer: a [android.graphics.drawable.Drawable] carries
@@ -4829,7 +4913,7 @@ class NotebookActivity : AppCompatActivity() {
         val rects = (
             listOfNotNull(rectOf(binding.topBar), rectOf(binding.bottomStrip)) +
                 selectionToolbar.rects() + lassoPopup.rects() + tagsPopup.rects() +
-                insertBar.rects() + eraserBar.rects() + transformBar.rects() +
+                insertBar.rects() + eraserBar.rects() + paletteBar.rects() + transformBar.rects() +
                 (if (::collapsed.isInitialized) collapsed.rects() else emptyList())
             )
             .map { Rect(it.left - paperLoc[0], it.top - paperLoc[1], it.right - paperLoc[0], it.bottom - paperLoc[1]) }
@@ -4883,6 +4967,7 @@ class NotebookActivity : AppCompatActivity() {
                 dismissTagsPopupOnContact(ev, ev.actionIndex)
                 dismissInsertBarOnContact(ev, ev.actionIndex)
                 dismissEraserBarOnContact(ev, ev.actionIndex)
+                dismissPaletteBarOnContact(ev, ev.actionIndex)
                 dismissCollapsedOnContact(ev, ev.actionIndex)
             }
             if (action == MotionEvent.ACTION_DOWN) {
@@ -4956,6 +5041,19 @@ class NotebookActivity : AppCompatActivity() {
         hideEraserBar()
     }
 
+    /** The shade panel's outside-tap dismissal (arc 49 / P4) — the eraser sub-bar's rule with the
+     *  pen button excluded (its own re-tap toggles the bar), and the collapsed rows it may be
+     *  hanging under kept, so a contact on the mini toolbar's pen button toggles rather than
+     *  closes-then-reopens. */
+    private fun dismissPaletteBarOnContact(ev: MotionEvent, index: Int) {
+        if (!::paletteBar.isInitialized || !paletteBar.isShowing) return
+        val x = ev.getX(index).toInt(); val y = ev.getY(index).toInt()
+        if (rectOf(binding.btnPen)?.contains(x, y) == true) return
+        if (paletteBar.contains(x, y)) return
+        if (::collapsed.isInitialized && collapsed.contains(x, y)) return
+        hidePaletteBar()
+    }
+
     /**
      * The collapsed chrome's outside-tap dismissal (arc 36) — the rule lives in [CollapsedChrome];
      * the sub-bars hung off its rows (Insert, Tags) keep the rows up under a contact of their own.
@@ -4969,7 +5067,8 @@ class NotebookActivity : AppCompatActivity() {
         if (!::collapsed.isInitialized) return
         val dismissed = collapsed.dismissOnContact(ev.getX(index).toInt(), ev.getY(index).toInt()) { x, y ->
             (::insertBar.isInitialized && insertBar.contains(x, y)) ||
-                (::tagsPopup.isInitialized && tagsPopup.contains(x, y))
+                (::tagsPopup.isInitialized && tagsPopup.contains(x, y)) ||
+                (::paletteBar.isInitialized && paletteBar.contains(x, y))
         }
         if (dismissed) tapDismissedPopup = true
     }
@@ -4987,6 +5086,7 @@ class NotebookActivity : AppCompatActivity() {
             (::tagsPopup.isInitialized && tagsPopup.contains(x, y)) ||
             (::insertBar.isInitialized && insertBar.contains(x, y)) ||
             (::eraserBar.isInitialized && eraserBar.contains(x, y)) ||
+            (::paletteBar.isInitialized && paletteBar.contains(x, y)) ||
             (::transformBar.isInitialized && transformBar.contains(x, y)) ||
             (::collapsed.isInitialized && collapsed.contains(x, y))
     }
@@ -5005,6 +5105,10 @@ class NotebookActivity : AppCompatActivity() {
         // Arc 33: another paper screen (the pad, the calendar, the sticky editor) may have flipped
         // the one global flag while this one was away — re-sync before the paper comes back.
         if (::chromeToggle.isInitialized) chromeToggle.sync(chromePrefs.hidden)
+        // Arc 49 / P4: the same for the pen's shade — the pad, the calendar and the sticky editor
+        // pick into the one device-wide level, and the host wrote a returning screen's level
+        // before this ran.
+        if (::paletteBar.isInitialized) applyPenShade()
         if (::paper.isInitialized) paper.resumeDrawing()
         // Re-discovered on every resume: a package can be disabled or replaced under us, and this
         // is also the resume that follows a return from the pad.

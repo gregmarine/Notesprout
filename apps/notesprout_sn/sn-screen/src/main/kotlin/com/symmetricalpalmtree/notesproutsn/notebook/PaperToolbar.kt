@@ -35,8 +35,8 @@ import com.symmetricalpalmtree.notesproutsn.screen.R
  * only the style, width and colour the engine is armed with, and those belong to the screen, which
  * is why this bar asks it ([altPenArmed]) rather than deciding. So a pencil↔pen tap is an *actual*
  * change with no tool change in it — [onToolTapped] fires, the screen applies the kind
- * ([onPenKindPicked]) and [sync] repaints — and a tap on the already-armed **primary** pen is
- * [onPenReTap], the eraser's re-tap rule in every particular (see [select]). Every parameter is
+ * ([onPenKindPicked]) and [sync] repaints — and a tap on the already-armed pen of **either kind**
+ * is [onPenReTap] with that kind, the eraser's re-tap rule in every particular (see [select]). Every parameter is
  * defaulted and last, so a screen with one pen compiles and behaves exactly as it did.
  *
  * Selected = the bordered `state_selected` look of `bg_toolbar_button`. No colour anywhere.
@@ -75,14 +75,17 @@ class PaperToolbar(
      *  panel, where the firmware pen is re-armed from the colour and width the screen sets, and a
      *  tool armed first would take the first stroke with the kind that is on its way out. */
     private val onPenKindPicked: (alt: Boolean) -> Unit = {},
-    /** A tap on the **already-armed primary** pen (arc 44 / T3) — the sketch face opens its
-     *  [PencilBar] under it. [onEraserReTap]'s rule exactly, including that [onToolTapped] does
-     *  **not** fire with it (see [select]). A re-tap on the armed *alt* pen is honestly nothing:
-     *  the gel pen has no options to open. */
-    private val onPenReTap: () -> Unit = {},
+    /** A tap on the **already-armed** pen of either kind (arc 44 / T3; the alt kind since arc 46)
+     *  — the sketch face opens its shade panel under the button, for that kind. [onEraserReTap]'s
+     *  rule exactly, including that [onToolTapped] does **not** fire with it (see [select]). */
+    private val onPenReTap: (alt: Boolean) -> Unit = {},
+    /** The stylus smudge (arc 50 — the sketch face's Smudge, [Tool.SMUDGE]), or null on every
+     *  screen without one. A plain tool with no kinds and no sub-bar: a tap arms it, a re-tap is
+     *  nothing. Defaulted and last, so every existing caller compiles unchanged. */
+    private val btnSmudge: ImageButton? = null,
 ) {
     init {
-        listOfNotNull(btnBack, btnPen, btnEraser, btnLasso, btnAltPen).forEach {
+        listOfNotNull(btnBack, btnPen, btnEraser, btnLasso, btnAltPen, btnSmudge).forEach {
             TooltipCompat.setTooltipText(it, it.contentDescription)
         }
         btnBack.setOnClickListener { releaseRenderIfIdle(); onBack() }
@@ -90,6 +93,7 @@ class PaperToolbar(
         btnAltPen?.setOnClickListener { selectPen(alt = true) }
         btnEraser.setOnClickListener { select(Tool.ERASER) }
         btnLasso?.setOnClickListener { select(Tool.LASSO) }
+        btnSmudge?.setOnClickListener { select(Tool.SMUDGE) }
         sync(paper.tool)
     }
 
@@ -142,7 +146,7 @@ class PaperToolbar(
         releaseRenderIfIdle()
         val armed = paper.tool == Tool.PEN
         if (armed && altPenArmed() == alt) {
-            if (!alt) onPenReTap()
+            onPenReTap(alt)
             return
         }
         onToolTapped()
@@ -191,6 +195,7 @@ class PaperToolbar(
             btnEraser.setImageResource(if (lassoKind) R.drawable.ic_lasso_eraser else R.drawable.ic_eraser)
         }
         btnLasso?.isSelected = tool == Tool.LASSO
+        btnSmudge?.isSelected = tool == Tool.SMUDGE
         onSynced()
     }
 

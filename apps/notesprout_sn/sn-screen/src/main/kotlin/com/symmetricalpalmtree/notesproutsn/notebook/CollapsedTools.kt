@@ -16,7 +16,7 @@ object CollapsedTools {
 
     /** The fixed order of the mini toolbar's tool buttons (decision 2 / 3): the two erasers are
      *  two buttons, so the lasso eraser is one tap away while collapsed. */
-    val ORDER: List<Tool> = listOf(Tool.PEN, Tool.ERASER, Tool.LASSO_ERASER, Tool.LASSO)
+    val ORDER: List<Tool> = listOf(Tool.PEN, Tool.ERASER, Tool.SMUDGE, Tool.LASSO_ERASER, Tool.LASSO)
 
     /**
      * The corner button's glyph for [tool]. The lasso wears the clipboard mark exactly as the
@@ -24,15 +24,18 @@ object CollapsedTools {
      * paper will paste). [Tool.NONE] — a surface that captures nothing — wears the pen: the
      * button names what a tap will bring back, and the pen is what every screen arms first.
      *
-     * [altPen] is arc 44 / T3's second **kind** of [Tool.PEN] — the sketch face's gel pen, which is
-     * `Tool.PEN` to the engine exactly as its pencil is and differs only in what the pen is armed
-     * with. So the glyph, not the tool, is what says which one is on the paper. Defaulted false,
-     * so every screen with one pen reads exactly as it did.
+     * The pen wears Tabler's `ballpen` (`ic_pen`, the user's call of 2026-09-22 — the pencil glyph
+     * is for a true pencil, so it moved to `ic_pencil`, the sketch face's Pencil). The sketch face's
+     * two pen **kinds** (arc 44 / T3, both `Tool.PEN`) never wear this resource: each paints its own
+     * shade-filled glyph ([CollapsedChrome.PenKinds.primaryIcon] / `altIcon`), and the corner
+     * button wears the armed kind's.
      */
-    fun iconFor(tool: Tool, clipboardLoaded: Boolean = false, altPen: Boolean = false): Int = when (tool) {
-        Tool.PEN -> if (altPen) R.drawable.ic_ballpen else R.drawable.ic_pen
+    fun iconFor(tool: Tool, clipboardLoaded: Boolean = false): Int = when (tool) {
+        Tool.PEN -> R.drawable.ic_pen
         Tool.NONE -> R.drawable.ic_pen
         Tool.ERASER -> R.drawable.ic_eraser
+        // The stylus smudge (arc 50): Tabler's hand-finger — the finger's rub, on the nib.
+        Tool.SMUDGE -> R.drawable.ic_smudge
         Tool.LASSO_ERASER -> R.drawable.ic_lasso_eraser
         Tool.LASSO -> if (clipboardLoaded) R.drawable.ic_lasso_clipboard else R.drawable.ic_lasso
     }

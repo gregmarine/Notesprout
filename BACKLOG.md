@@ -75,6 +75,64 @@ and the e-ink repaints the whole library.
 
 ---
 
+## NSE · Sketch — export one sketch from a multi-page sketchbook (noted 2026-09-24)
+
+> The user, at arc 51's freeze: *"if we don't have a way to export a single sketch from a
+> multi-page sketchbook, let's add that to our notes for future work."*
+
+- **What exists:** the Export screen's **page scope** (`ExportScope.Page`, reachable from the
+  notebook screen's export door) — for a sketched page it delivers a **folder** holding the ink
+  page *and* the sketch page (`ExportDelivery.perPage`, the K7 rule), never a single file.
+- **What is missing:** (1) an export door **on the sketch face itself** (today the user has to
+  leave for the notebook or the library sheet); (2) a **sketch-only** single-image export of the
+  current page — the flattened rasters as one PNG (or one PDF page), without the ink page beside
+  it; (3) a Guides-free guarantee is already there (the export reads the two raster rows only).
+- **Shape when decided:** an overflow entry on the sketch face ("Export sketch…") that launches
+  the host's `ExportActivity` at page scope with a new `sketchOnly` option, or a lighter direct
+  door that writes the current page's flatten (`SketchRaster.toWebp`'s composite) to a picked
+  file / Google Drive. A fresh user decision; not scheduled.
+
+## NSE · Sketch — the flank (side-of-the-lead shading), OFF since 2026-09-21
+
+> **Arc 47's flank is switched off** (g-paper Phase 39 → 0.1.53): the Supernote pencil bakes
+> upright regardless of tilt and draws with the round lead — the user's word: *"remove the side
+> pencil shading completely. Just normal pencil regardless of tilt."* The model stays in
+> `GraphiteGrain` (`Lead.FLANK`, `StrokePoint.azimuth`, the tilt capture seams, `FlankRenderHarness`,
+> `probe-tilt`) as an opt-in no engine uses; two lines in `RattaPaperView` (`bakeTilt`, `pencilLead`)
+> turn it back on. If it comes back, it comes back **with** the grain fix below, and the grain fix
+> needs the live path made affordable first.
+
+> The grain, as it stood when the user set it aside — after living with arc 47's side-of-the-lead shading: *"it still feels like it is
+> clumping. It should be the same sort of grain as a normal pencil stroke, only wider. Right now,
+> it looks like charcoal instead of pencil."* Then, after two walks of the fix: *"Let's drop this
+> feature and make a note to come back to it later. It isn't working well and it's holding me back."*
+
+- **The diagnosis stands.** The flank makes its grey by leaving four tooth sites in five bare with
+  full-black flecks; a sparse random field clumps by chance — that is charcoal — and none of arc
+  47's knobs (tooth weight, depth, the fan, lighten) reach it, because each shaped the sparse field
+  rather than its sparseness.
+- **The fix that was right on paper** (g-paper Phase 38, built + reverted the same day; code in
+  g-paper history 0c2d1fe · 342bdce · 744ef2f, write-up in g-paper `PLAN.md` § Phase 38): the user
+  chose *paler flecks at the point's density* over *black flecks and a darker band*. `Grain.pale`
+  (a byte per fleck, `null` on full-ink grains so the round lead stays bit-identical), sites at
+  the point's own odds for the pressure, the lightening as alpha (`FLANK_LIGHTEN` 0.70), the
+  barrel-end fall kept in the sites so the far edge feathers, `MAX_FLECKS` 1M. Rendered against
+  the user's recorded Manta strokes (`FlankRenderHarness`, the probe CSV on the Manta at
+  `Android/data/com.symmetricalpalmtree.gpaper.probetilt/files/`): an even fine speckle, no clumps.
+- **Why it was pulled: the live path could not afford it.** The `live graphite:` log lines
+  showed the *sparse* flank already at ~85 % of a core on the main thread (~3 µs a tooth site on
+  the RK3566; 125 sites per px of travel whether one in five or one in two catch). Six-fold flecks
+  tipped it: input coalesced into ~24 events per stroke, each box mostly empty paper flattened and
+  dithered whole — 237 ms/event on the Manta, a 15 s ANR that lost the stroke, 787 ms/event on the
+  Nomad. A counting-sort fleck drawer, `FLANK_STATION_STRIDE` 2 and chunked live batches halved it
+  on the JVM; never confirmed on the glass.
+- **To come back to it — the cost is the site cost, not the fleck cost:** (1) the per-site price
+  (two octaves of value noise per site; sample the tooth once per cell and reuse, or a precomputed
+  tile); (2) the sweep on a worker thread, the main thread only compositing and posting;
+  (3) fewer sites per px on the flank than the point's lattice, the look re-checked on the probe
+  renders first. Then re-apply the Phase 38 commits on top and walk. Do the grain work on the
+  hand's own recorded strokes, never a synthetic sweep (arc 47's lesson).
+
 ## Supernote (Ratta) — deferred items
 
 > From the retired `SUPERNOTE_SUPPORT_PLAN.md` (all 10 phases shipped on the `supernote` branch,
@@ -1281,3 +1339,21 @@ there is no export of notes to make the extra geometry visible today.
 not deferred for a later pass: a bigger trash tap target on `EventRowView`'s per-row delete icon in
 the events list, and the type button's (`btnType`, `activity_event_editor.xml`) `140dp` minimum
 width. Both stand as shipped.
+
+## Notesprout SN — arc 49 "Panel" (2026-09-22): the known costs left to watch, not fixed
+
+Recorded at the freeze (`apps/notesprout_sn/PANEL_INK_PLAN.md`); none bit on the Nomad walks.
+
+- **The committed image is `ARGB_8888`, view-sized** (~10 MB Nomad, ~20 MB Manta) per direct
+  face. `RGB_565` would halve it at 6-bit luma; not taken. Revisit only if a walk shows memory
+  pressure with the pad or a sticky open over the notebook.
+- **No page-turn refresh** (decision 3): a text-dense page may ghost worse than the sketch face
+  does. The page-turn full refresh exists in g-paper and is off by decision.
+- **A live composite vs. a later vector re-render can differ by ±1/255** at a dither threshold —
+  a dot may flip at a page reload. A device question; nobody has seen it.
+- **The event note stays black** (decision 5: no toolbar, no pen button). If a shade is ever
+  wanted there, it is the host's `PenShadePrefs` read through `NoteSurface`, no seam change.
+- **`DocumentPdfRender`, `BuiltInTemplates`' card renders and `CalendarRender` stay `RGB_565`**:
+  nothing a pen chose is drawn in them. If a calendar page ever carries a grey pen's ink in the
+  render itself, `CalendarRender` moves too.
+

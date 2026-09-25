@@ -91,6 +91,47 @@ object SketchContract {
      */
     const val MIN_API_VERSION_FOR_SKETCH_TOOLS: Int = 19
 
+    /**
+     * The floor for [SketchToolSettings.penShade] (arc 46 "Palette" / Q1, 2026-09-19 — the user's
+     * decision 3: the gel pen takes the same sixteen-shade choice as the pencil, so its shade is
+     * remembered beside the pencil's). Not a method: the two tool tails are unchanged, and what
+     * grew is the **parcel** — a fourth `int` after `size`, read with the exhausted-parcel rule, so
+     * a 20 host and a 21 screen still read each other (the pen reads as black on the old side).
+     * Named the way the method floors are so the ledger says when the field arrived; like them it
+     * is a number an extension declares to say what it requires of the host, and `:ext-sketch`
+     * declares it. [MIN_API_VERSION_FOR_SKETCH] stays 20 — nothing changed shape in place.
+     */
+    const val MIN_API_VERSION_FOR_SKETCH_PEN_SHADE: Int = 21
+
+    /**
+     * The **method** floor for the four guide tails (arc 51 "Guides" / J1, 2026-09-23 — the user's
+     * decision: a grid and a reference image lie under the sketch as tools, never as marks):
+     * [ISketchHost.guides] / [ISketchHost.readGuideImageChunk] / [ISketchHost.putGuides] /
+     * [ISketchHost.saveGuideImageChunk], transaction codes 14–17, with two new parcelables,
+     * [SketchGuideSettings] and [SketchGuideState]. [MIN_API_VERSION_FOR_SKETCH_TOOLS]'s shape
+     * exactly: a sketch screen that calls them declares 22 and is never discovered by a 21 host
+     * that would land them on nothing. [MIN_API_VERSION_FOR_SKETCH] stays 20 — nothing changed
+     * shape in place — and, like the pen-shade floor, this one sits **above** the action floor: the
+     * correct sense for a live tail.
+     */
+    const val MIN_API_VERSION_FOR_SKETCH_GUIDES: Int = 22
+
+    // ── The guides (arc 51 / J1) ──────
+
+    /** [SketchGuideSettings.gridKind]: no grid — and no grid row: pushing it soft-deletes one. */
+    const val GRID_OFF: Int = 0
+
+    /** [SketchGuideSettings.gridKind]: a grid of lines, square cells, centred on the page. */
+    const val GRID_LINES: Int = 1
+
+    /** [SketchGuideSettings.gridKind]: dots at the same cells' corners. */
+    const val GRID_DOTS: Int = 2
+
+    /** Largest [SketchGuideSettings.imageOpacity] — a percent, so 100. Like
+     *  [MAX_TOOL_SETTING_INDEX] a sanity bound on an unmarshalled integer: which opacities the
+     *  face offers is `:ext-sketch`'s ladder, and a stored percent off it reads as the default. */
+    const val MAX_OPACITY_PERCENT: Int = 100
+
     // ── The two rasters (arc 45 / G2) ──────
 
     /**
@@ -118,9 +159,18 @@ object SketchContract {
 
     // ── The rasters on the wire ──────
 
-    /** Most bytes in one chunk — 512 KiB, the store's inline carrier, comfortably under the ~1 MB
-     *  Binder transaction budget with the ink transfers' headroom. [ByteChunks] holds the rule. */
-    const val SKETCH_CHUNK_BYTES: Int = 512 * 1024
+    /**
+     * Most bytes in one chunk — **128 KiB** since 2026-09-22 (512 KiB from arc 43 to then).
+     * Binder's ~1 MB transaction buffer is **per process and shared by every transaction in
+     * flight**, and a raster read is never alone in it: the face saves the page it is leaving
+     * while it asks for the next, so a 457 KB reply landed beside a 430 KB push and the reply
+     * failed as a `DeadObjectException` — the page came up blank on the glass while its pixels sat
+     * safe in the `.soil` (the user: "I lost the sketch for a moment … eventually the sketch I was
+     * working on magically came back"). A 156 KB page never failed. The count travels in
+     * [SketchPageState], so the two sides never have to agree on this number to agree on a page.
+     * [ByteChunks] holds the rule.
+     */
+    const val SKETCH_CHUNK_BYTES: Int = 128 * 1024
 
     /**
      * The hard refusal: most bytes **one raster's** image may be — **6 MiB, the SQLCipher cursor
@@ -215,13 +265,14 @@ object SketchContract {
      *  tool number reads as. */
     const val TOOL_PENCIL: Int = 0
 
-    /** [SketchToolSettings.tool]: the gel pen (`StrokeStyle.PEN`, black, one size — decision 4). */
+    /** [SketchToolSettings.tool]: the gel pen (`StrokeStyle.PEN`, one size — arc 44's decision 4;
+     *  its shade is [SketchToolSettings.penShade] since arc 46). */
     const val TOOL_PEN: Int = 1
 
     /**
      * Largest value any [SketchToolSettings] field may carry — a **sanity bound on an unmarshalled
-     * integer, not the palette's size** ([MAX_PAGE_PX]'s kind of number). How many shades and sizes
-     * there are is `:ext-sketch`'s to know and to change; the face reads an index past the end of
+     * integer, not the palette's size** ([MAX_PAGE_PX]'s kind of number). How many shades there
+     * are is `:ext-sketch`'s to know and to change; the face reads an index past the end of
      * its own list as its default. 255 is past anything a bar of swatches could ever hold, which
      * is the point: beyond it the number is not an index.
      */

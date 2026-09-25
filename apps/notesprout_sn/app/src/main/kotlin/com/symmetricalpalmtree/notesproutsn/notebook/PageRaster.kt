@@ -21,8 +21,8 @@ import java.io.IOException
  * It lives here rather than in `export/` because it is a *page* question, not an export one — what
  * a page looks like is the notebook's answer to give, and the bake was only ever its first reader.
  * Nothing about the drawing changed in the move: the same white ground, the same template rect, the
- * same [PagePreview.drawContent] layering, the same [Bitmap.Config.RGB_565] over an opaque ground
- * and the same lossy-WEBP q100 encoder.
+ * same [PagePreview.drawContent] layering, the same [Bitmap.Config.ARGB_8888] over an opaque ground
+ * (arc 49 / P4 — `RGB_565` until then) and the same lossy-WEBP q100 encoder.
  *
  * Neither neighbour would do. [PagePreview.render] draws a **card**: it scales the page down and
  * rules an edge around it, which is chrome. [CoverSnapshot] renders at the *cover's* size. This one
@@ -51,8 +51,12 @@ object PageRaster {
 
     /**
      * One page, full fidelity at its own pixel size. Opaque by construction: erased to white, and
-     * every layer lands on top, which is what makes [Bitmap.Config.RGB_565] correct here rather
-     * than merely cheaper (the F5 rule — half the bytes and no alpha to lose).
+     * every layer lands on top. **[Bitmap.Config.ARGB_8888] since arc 49 / P4** (the user's
+     * decision 4: "exports bake `ARGB_8888`"): the pen writes in sixteen greys now, and `RGB_565`
+     * rounds every tone to five or six bits — `#505050` comes out `#525152`, a slightly warm, slightly
+     * lighter grey that is not the one that was chosen. The F5 rule (half the bytes, no alpha to
+     * lose) stood while every stroke was black; it costs one page-sized image at a time, which the
+     * one-page-in-memory rule already bounds.
      *
      * [template] is drawn into the whole page rect rather than blitted 1:1. It is authored at the
      * page's size in every file this app writes, so the rect is normally a no-op scale; a template
@@ -72,7 +76,7 @@ object PageRaster {
         paints: PagePreview.Paints,
     ): ByteArray {
         val bitmap = try {
-            Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.RGB_565)
+            Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
         } catch (e: OutOfMemoryError) {
             throw IOException("a ${widthPx}x$heightPx page would not allocate", e)
         }

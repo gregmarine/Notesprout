@@ -9,144 +9,127 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The face's tool state (arc 44 / T3): what each armed kind draws with, that a switch keeps the
- * pencil's choices, and — the part that matters most — that **every number read from outside lands
- * on something legal**, field by field.
+ * The face's tool state (arc 44 / T3, remade by arc 46 "Palette"): what each armed kind draws
+ * with, that a switch keeps both kinds' shades, that a pick lands on the armed kind alone, and —
+ * the part that matters most — that **every number read from outside lands on something legal**,
+ * field by field.
  *
  * The round trip is the seam's whole promise: indices go out, the same indices come back, and the
  * host learns nothing about what they name.
  */
 class SketchToolStateTest {
 
-    @Test fun `the default is the pencil at level 5 and the finest lead`() {
+    private val pen = SketchContract.TOOL_PEN
+    private val pencil = SketchContract.TOOL_PENCIL
+
+    @Test fun `the default is the pencil at 505050 with a black pen waiting`() {
         val state = SketchToolState.DEFAULT
         assertFalse(state.isPen)
-        assertEquals(SketchContract.TOOL_PENCIL, state.tool)
-        assertEquals(SketchPalette.DEFAULT_SHADE, state.shadeLevel)
-        assertEquals(SketchPalette.DEFAULT_SIZE, state.sizeIndex)
+        assertEquals(pencil, state.tool)
+        assertEquals(SketchPalette.DEFAULT_SHADE, state.pencilShade)
+        assertEquals(SketchPalette.DEFAULT_PEN_SHADE, state.penShade)
         assertEquals(StrokeStyle.PENCIL, state.penStyle)
-        assertEquals(0xFF555555.toInt(), state.penColor)
-        assertEquals(1.2f, state.penWidth, 0f)
+        assertEquals(0xFF505050.toInt(), state.penColor)
+        assertEquals(SketchPalette.PENCIL_WIDTH_PX, state.penWidth, 0f)
+        assertEquals(1, state.armedShade)
     }
 
-    @Test fun `the gel pen is PEN, black, five px - whatever the pencil is set to`() {
-        val state = SketchToolState.of(SketchContract.TOOL_PEN, shadeLevel = 9, sizeIndex = 11)
+    @Test fun `the gel pen draws PEN at its own width and its own shade`() {
+        val state = SketchToolState.DEFAULT.withTool(pen)
         assertTrue(state.isPen)
         assertEquals(StrokeStyle.PEN, state.penStyle)
-        assertEquals(SketchPalette.PEN_COLOR, state.penColor)
         assertEquals(SketchPalette.PEN_WIDTH_PX, state.penWidth, 0f)
-    }
-
-    @Test fun `a switch to the pen and back keeps the shade and the lead`() {
-        val pencil = SketchToolState.DEFAULT.withShade(9).withSize(3)
-        val pen = pencil.withTool(SketchContract.TOOL_PEN)
-        assertEquals(9, pen.shadeLevel)
-        assertEquals(3, pen.sizeIndex)
-        assertEquals(pencil, pen.withTool(SketchContract.TOOL_PENCIL))
-    }
-
-    @Test fun `the pencil draws the shade and the lead that were picked`() {
-        val state = SketchToolState.DEFAULT.withShade(0).withSize(4)
-        assertEquals(StrokeStyle.PENCIL, state.penStyle)
         assertEquals(0xFF000000.toInt(), state.penColor)
-        assertEquals(12f, state.penWidth, 0f)
-        // Both ends of the widened list, and the white lead — the lightener.
-        val heaviest = SketchToolState.DEFAULT.withShade(15).withSize(11)
-        assertEquals(0xFFFFFFFF.toInt(), heaviest.penColor)
-        assertEquals(96f, heaviest.penWidth, 0f)
+        assertEquals(0, state.armedShade)
+        val grey = state.withShade(9)
+        assertEquals(0xFFAAAAAA.toInt(), grey.penColor)
+        assertEquals(9, grey.armedShade)
     }
 
-    @Test fun `the Pencil button reports the pencil's shade whatever kind is armed`() {
-        // Arc 44 / T3, the user's answer: the button's fill is the armed shade — and a button says
-        // what a tap on it will bring back, so the gel pen does not blank it or turn it black.
-        val pencil = SketchToolState.DEFAULT.withShade(9)
-        assertEquals(SketchPalette.shade(9), pencil.reportedShade)
-        val pen = pencil.withTool(SketchContract.TOOL_PEN)
-        assertEquals(pencil.reportedShade, pen.reportedShade)
-        // …which is exactly where it parts from `penColor`: that one is what the ARMED kind draws.
-        assertEquals(SketchPalette.PEN_COLOR, pen.penColor)
+    @Test fun `a pick lands on the armed kind and leaves the other alone`() {
+        val pencilPicked = SketchToolState.DEFAULT.withShade(12)
+        assertEquals(12, pencilPicked.pencilShade)
+        assertEquals(SketchPalette.DEFAULT_PEN_SHADE, pencilPicked.penShade)
+        val penPicked = pencilPicked.withTool(pen).withShade(3)
+        assertEquals(12, penPicked.pencilShade)
+        assertEquals(3, penPicked.penShade)
+        // And back: the pencil is exactly as it was left.
+        val back = penPicked.withTool(pencil)
+        assertEquals(12, back.armedShade)
+        assertEquals(0xFFC8C8C8.toInt(), back.penColor)
+        assertEquals(3, back.penShade)
     }
 
-    @Test fun `the darkest lead reports its own tone, and so does every other offered level`() {
-        assertEquals(0xFF000000.toInt(), SketchToolState.DEFAULT.withShade(0).reportedShade)
-        assertEquals(0xFFFFFFFF.toInt(), SketchToolState.DEFAULT.withShade(15).reportedShade)
-        // Distinct levels are distinct fills — the ARGB is the token both bars compare, so two
-        // levels sharing one would leave a pick showing the tone before it.
-        val tones = SketchPalette.SHADE_LEVELS.map { SketchToolState.DEFAULT.withShade(it).reportedShade }
-        assertEquals(tones.size, tones.toSet().size)
+    @Test fun `the pencil draws its picked shade including white at one width`() {
+        val white = SketchToolState.DEFAULT.withShade(SketchPalette.WHITE_SHADE)
+        assertEquals(0xFFFFFFFF.toInt(), white.penColor)
+        assertEquals(StrokeStyle.PENCIL, white.penStyle)
+        assertEquals(SketchPalette.PENCIL_WIDTH_PX, white.penWidth, 0f)
     }
 
-    @Test fun `a shade this build does not offer reports the default's tone, never a stray one`() {
-        // A level of the ladder this build simply does not offer (7), and one off the ladder
-        // entirely (16) — the stored number is the LEVEL, so both arrive the same way.
-        listOf(7, 16).forEach { level ->
-            val past = SketchToolState.of(SketchContract.TOOL_PENCIL, level, 0)
-            assertEquals(SketchToolState.DEFAULT.reportedShade, past.reportedShade)
-            // The fill and the ink agree: the button can never report a tone the pencil would not
-            // draw.
-            assertEquals(past.penColor, past.reportedShade)
-        }
+    @Test fun `each button reports its own kind's shade whatever is armed`() {
+        val s = SketchToolState.DEFAULT.withShade(7).withTool(pen).withShade(14)
+        assertEquals(0xFF909090.toInt(), s.pencilReport)
+        assertEquals(0xFFDDDDDD.toInt(), s.penReport)
+        assertEquals(s.penReport, s.penColor)
+        val t = s.withTool(pencil)
+        assertEquals(0xFF909090.toInt(), t.pencilReport)
+        assertEquals(0xFFDDDDDD.toInt(), t.penReport)
+        assertEquals(t.pencilReport, t.penColor)
     }
 
-    @Test fun `nothing remembered is the defaults, not a failure`() {
+    @Test fun `every offered level reports a distinct tone on both kinds`() {
+        val pencilTones = SketchPalette.SHADE_LEVELS.map { SketchToolState.DEFAULT.withShade(it).pencilReport }
+        assertEquals(pencilTones.size, pencilTones.distinct().size)
+        val penTones = SketchPalette.SHADE_LEVELS.map { SketchToolState.DEFAULT.withTool(pen).withShade(it).penReport }
+        assertEquals(penTones.size, penTones.distinct().size)
+    }
+
+    @Test fun `nothing remembered is the default`() {
         assertEquals(SketchToolState.DEFAULT, SketchToolState.fromSettings(null))
     }
 
-    @Test fun `a remembered state comes back exactly as it went out`() {
-        val state = SketchToolState.of(SketchContract.TOOL_PEN, shadeLevel = 9, sizeIndex = 2)
-        val settings = state.toSettings()
-        assertEquals(SketchContract.TOOL_PEN, settings.tool)
-        assertEquals(9, settings.shade)
-        assertEquals(2, settings.size)
-        assertEquals(state, SketchToolState.fromSettings(settings))
+    @Test fun `the round trip carries both shades and writes a dead size of 0`() {
+        val state = SketchToolState.of(pen, pencilShade = 11, penShade = 2)
+        val parcel = state.toSettings()
+        assertEquals(SketchToolSettings(pen, 11, 0, 2), parcel)
+        assertEquals(0, parcel.size)
+        assertEquals(state, SketchToolState.fromSettings(parcel))
+        // A remembered size from arc 44 is simply not read.
+        assertEquals(state, SketchToolState.fromSettings(SketchToolSettings(pen, 11, 7, 2)))
     }
 
     @Test fun `an unknown tool reads as the pencil`() {
-        assertEquals(SketchContract.TOOL_PENCIL, SketchToolState.of(7, 5, 0).tool)
-        assertEquals(SketchContract.TOOL_PENCIL, SketchToolState.of(-1, 5, 0).tool)
-        val stranger = SketchToolSettings(SketchContract.MAX_TOOL_SETTING_INDEX, 5, 0)
-        assertEquals(SketchContract.TOOL_PENCIL, SketchToolState.fromSettings(stranger).tool)
+        assertEquals(pencil, SketchToolState.of(7, 5, 0).tool)
+        assertEquals(pencil, SketchToolState.of(255, 5, 0).tool)
+        assertEquals(pen, SketchToolState.of(pen, 5, 0).tool)
     }
 
-    @Test fun `a dropped level reads as the default - and keeps the rest`() {
-        // A ladder level this build does not offer: exactly what a device remembering one of the
-        // twelve this palette leaves out hands back, and what any stale level is.
-        val dropped = 12
-        val state = SketchToolState.fromSettings(SketchToolSettings(SketchContract.TOOL_PEN, dropped, 3))
-        assertEquals(SketchPalette.DEFAULT_SHADE, state.shadeLevel)
-        // Field by field: losing the shade must not lose the pen or the lead with it.
-        assertTrue(state.isPen)
-        assertEquals(3, state.sizeIndex)
+    @Test fun `a level this build does not offer falls to that field's default and keeps the rest`() {
+        val a = SketchToolState.of(pen, pencilShade = 200, penShade = 9)
+        assertEquals(pen, a.tool)
+        assertEquals(SketchPalette.DEFAULT_SHADE, a.pencilShade)
+        assertEquals(9, a.penShade)
+        val b = SketchToolState.of(pencil, pencilShade = 9, penShade = 255)
+        assertEquals(9, b.pencilShade)
+        assertEquals(SketchPalette.DEFAULT_PEN_SHADE, b.penShade)
     }
 
-    @Test fun `a size index off the list reads as the default - and keeps the rest`() {
-        val past = SketchPalette.SIZES_PX.size
-        val state = SketchToolState.fromSettings(SketchToolSettings(SketchContract.TOOL_PENCIL, 9, past))
-        assertEquals(SketchPalette.DEFAULT_SIZE, state.sizeIndex)
-        assertEquals(9, state.shadeLevel)
+    @Test fun `the seam's whole sanity bound is survivable`() {
+        val max = SketchContract.MAX_TOOL_SETTING_INDEX
+        val s = SketchToolState.fromSettings(SketchToolSettings(max, max, max, max))
+        assertEquals(pencil, s.tool)
+        assertEquals(SketchPalette.DEFAULT_SHADE, s.pencilShade)
+        assertEquals(SketchPalette.DEFAULT_PEN_SHADE, s.penShade)
     }
 
-    @Test fun `the seam's sanity bound is survivable at both ends`() {
-        val top = SketchToolSettings(
-            SketchContract.MAX_TOOL_SETTING_INDEX,
-            SketchContract.MAX_TOOL_SETTING_INDEX,
-            SketchContract.MAX_TOOL_SETTING_INDEX,
-        )
-        assertEquals(SketchToolState.DEFAULT, SketchToolState.fromSettings(top))
-        assertEquals(SketchToolState.DEFAULT, SketchToolState.of(-9, -9, -9))
-    }
-
-    @Test fun `every state a pick can make is a legal parcel`() {
-        // `toSettings` hands three ints to a constructor that refuses anything outside the seam's
-        // bound — so every reachable state must be inside it, at both ends of every list.
-        val kinds = listOf(SketchContract.TOOL_PENCIL, SketchContract.TOOL_PEN)
-        kinds.forEach { tool ->
-            SketchPalette.SHADE_LEVELS.forEach { level ->
-                SketchPalette.SIZES_PX.indices.forEach { index ->
-                    val settings = SketchToolState.of(tool, level, index).toSettings()
-                    assertEquals(tool, settings.tool)
-                    assertEquals(level, settings.shade)
-                    assertEquals(index, settings.size)
+    @Test fun `every state a pick can make is a legal parcel and round-trips`() {
+        for (tool in listOf(pencil, pen)) {
+            for (p in SketchPalette.SHADE_LEVELS) {
+                for (q in SketchPalette.SHADE_LEVELS) {
+                    val state = SketchToolState.of(tool, p, q)
+                    val parcel = state.toSettings()
+                    assertEquals(state, SketchToolState.fromSettings(parcel))
                 }
             }
         }

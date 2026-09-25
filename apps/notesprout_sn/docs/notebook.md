@@ -115,6 +115,22 @@ child's `requestLayout`, so showing/moving/hiding a floating bar re-pushes by it
 `ACTION_DOWN` over chrome calls `releaseRender()` first (palm-gated on `isPenActive`) so an EPD
 panel shows the tap's result — done in `dispatchTouchEvent` because the buttons consume the touch.
 
+**The page is on the Supernote panel directly (arc 49 / P1, g-paper Phase 42 → 0.1.56).**
+`NotebookActivity` sets `paper.directInk = true` with the page's other properties, so on Ratta the
+notebook page is painted the way the sketch face's raster is: the committed picture (white,
+template, headings, texts, shapes, links, sticky icons, the strokes) is the flatten base, the live
+pen, the point eraser and the lasso's dashed trail go to `/dev/ebc` from the app, nothing moves at
+pen-up, and the glass shows a blue-noise dither of the page while exports, covers and page images
+keep their true greys. Where the panel refuses to open the page stays the ink daemon's with every
+overlay law intact — the flag is unconditional for that reason. Two consequences for this screen:
+**every panel post is cut around the exclusion rects**, so `pushExclusions()` listing every floating
+bar and popup is what keeps a segment drawn up to a bar from writing page pixels over it; and the
+`BLOCK_ALL` rect under a full-height panel (Contents, Recents) or before the page is loaded clips
+every post entirely, which is the wanted result — the load's own whole-page present is deferred past
+the synchronous swap to the real chrome rects in `loadCanvas`, so the first page always lands. There
+is no page-turn refresh, as on the sketch face (the arc's decision 3). Every `releaseRender()` behind
+`PenIdle` is a no-op on a direct page and the overlay clear it always was on a fallback page.
+
 The "Recognizing…" box (`overlay_recognizing.xml`, N2) is **not** part of this layout — like the
 library's tap-time overlay it is inflated at runtime into `android.R.id.content` (`RecognizingOverlay`,
 cached per Activity), which lands it as a sibling above the whole `activity_notebook.xml` tree
@@ -240,7 +256,7 @@ remembered.**
 
 | | |
 |---|---|
-| Pen | `StrokeStyle.PEN` · `InkColorCodec.BLACK` · `NotebookToolbar.PEN_WIDTH_PX` = **3 px** |
+| Pen | `StrokeStyle.PEN` · `NotebookToolbar.PEN_WIDTH_PX` = **3 px** · **one of sixteen greys since arc 49 / P4** (`InkTones`, device-wide in `PenShadePrefs`, black by default; the armed pen's re-tap opens `PaletteBar`, the pen button wears the tone — `NotebookToolbar.applyShade`) |
 | Eraser | `NotebookToolbar.ERASER_RADIUS_PX` = **15 px** |
 | Smart lasso / scribble erase | hardwired **on**, set on the surface in `onCreate` |
 
@@ -249,7 +265,9 @@ remembered.**
   second tap to open, and a button that disarmed itself would leave the pen doing something the
   bar is not showing.
 - R3's rich panels (five widths, five styles, sixteen greys, four eraser radii) and R5's lasso
-  panel are **gone**, with `ToolPrefs` (`SharedPreferences("sn_tool")`) and the whole page-tap /
+  panel are **gone** — **the sixteen greys came back alone at arc 49 / P4** (the user's decision,
+  once the page went direct to the panel and a grey pen could preview as grey; see
+  `PANEL_INK_PLAN.md`), as a shade panel on the pen's re-tap, never a width or style — with `ToolPrefs` (`SharedPreferences("sn_tool")`) and the whole page-tap /
   stylus-pen-up panel-dismiss machinery in `dispatchTouchEvent`. Handwriting is the app; a bar that
   only arms is one less thing between the pen and the paper, and a chrome surface that could sit
   open over the page is one less thing to dismiss. `SnApplication` deletes the stale `sn_tool`

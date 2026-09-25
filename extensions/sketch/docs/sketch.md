@@ -1,4 +1,4 @@
-# Sketch (arcs 43–45)
+# Sketch (arcs 43–51)
 
 **NSE · Sketch** gives a notebook page a second surface beside its ink: **two raster pictures,
 one flattened**, a graphite pencil and a rubbing eraser over a graphite bitmap, a gel pen (and
@@ -32,14 +32,34 @@ the same day, the user narrowed the pencil's shades to **the four tones the firm
 black, grey, light grey, white (levels 0 · 5 · 9 · 15) — the white lead being a lightener over
 graphite; g-paper 0.1.40 lets it preview LIGHT_GRAY (see "Arc 45's decisions", 6).
 
-**Engine.** g-paper is pinned at **0.1.39** (Phase 26, "Two rasters: graphite and ink",
+Arc 46 "Palette" (2026-09-19, branch `tools`, `PALETTE_PLAN.md` the plan + ledger, phases Q0–Q4)
+is the user's decision that, with the pencil and the pen going direct to the panel under a dither
+(g-paper 0.1.41–0.1.43), the four-tone limit no longer applies: **Atelier's sixteen tones, for the
+pencil and the gel pen alike; one pencil width (4 px, a real pencil's — **1 px since 2026-09-21** — the user's trials 4 → 2 → 1 after the flank came off); the shade panel on each
+pen button's re-tap, Atelier's swatches in a 4 × 4; both pen glyphs wearing their own shade** —
+and, from the first walk, **ink flattened over graphite** ("a white gel pen can write over
+anything"; g-paper Phase 30 → **0.1.44**, amending arc 45's "no top and no bottom"). The seam
+grew one parcel tail (`SketchToolSettings.penShade`, API 20 → 21). See "Arc 46's decisions"
+below.
+
+**Engine.** g-paper is pinned at **0.1.61** (**Phase 46, 2026-09-23: the sheet under the raster page, arc 51 — see "Guides (arc 51)" below**; **Phase 45, 2026-09-22: the smear follows the hand and `Tool.SMUDGE`, arc 50 — see "The stump" below**; **Phase 41, 2026-09-22: the panel is always dithered, nothing settles — see "Always dithered" below**; **Phase 40, 2026-09-22: the finger smudge, arc 48 — see "The smudge" below**; **Phase 39, 2026-09-21: the side-of-the-lead shading of arc 47 is OFF — "just normal pencil regardless of tilt"**: the Supernote pencil bakes upright always and draws with the round lead; the flank stays in `GraphiteGrain` as an opt-in no engine uses, and Phase 38 — its grain as the point's, in grey — was built, walked twice and withdrawn the same day because the live path could not afford it; both deferred in root `BACKLOG.md` § "NSE · Sketch — the flank"; Phase 37, 2026-09-21: a mark settles into tone **only** on the sketch face's **one-finger swipe down** or a page load — Phase 35's 2.5 s pause and Phase 32's tool / shade / rub / undo settles all **withdrawn**; see "The settle gesture" below; Phase 36 "The flank", arc 47 — see "Arc 47's decisions" below; Phases 31–34: the rubber settling before it posts, 2026-09-19: on the Supernote panel
+and in the window a mark is a blue-noise dither only while it is **live** or **waiting** — it
+settles into its true tone, the pen's line solid and the pencil's flecks each at their own alpha
+in the lead's tone, at the next thing that is not a mark: a tool or shade pick, a rub, an undo, a
+page load, or the host's `settleDisplay()` before chrome opens; `DitherFlatten.coverage` is the
+one rule, `settled` the flag; a loaded page is shown settled), over
+**0.1.44** (Phase 30, "Ink over graphite", 2026-09-19 — the flatten is ink `SRC_OVER` graphite,
+see arc 46's decision 9; the paragraph below is 0.1.39's account of the two rasters and stands but
+for the operator), over **0.1.39** (Phase 26, "Two rasters: graphite and ink",
 2026-09-17): `CanvasPaperView` holds two lazily-allocated rasters, `graphiteRaster` and
 `inkRaster`, each first allocated on its own first mark; `RasterLayer { GRAPHITE, INK }` names
 them and `RasterLayer.of(style)` is the **one** routing site — `StrokeStyle.PENCIL` bakes into
 graphite, every other style (the gel pen's `PEN`, "Bring in ink") bakes into ink.
 `compositeIntoRaster` routes each stroke to its raster with one `Canvas` per layer actually
 touched. Flatten is a single blit: `drawCommittedContent` draws graphite, then draws ink over it
-with `PorterDuff.Mode.DARKEN` (each output pixel is the darker of the two — order-independent, so
+with `PorterDuff.Mode.DARKEN` (**until 0.1.43** — since arc 46 / g-paper 0.1.44 the ink is drawn
+plain **over** the graphite, `SRC_OVER`, ink on top; the rest of this paragraph is 0.1.39's
+account) (each output pixel is the darker of the two — order-independent, so
 `renderToBitmap()` **is** the flatten, with no "which is on top" to explain and no fringe where a
 pencil stroke crosses a pen stroke). `eraseRasterAlong` names `graphiteRaster` only — the ink
 raster is never read, allocated, or announced by an erase, so a page with ink and no graphite
@@ -101,8 +121,9 @@ The user's, locked 2026-09-15 (`SKETCH_PLAN.md`); phase-start questions could no
    other engine.) **Amended by arc 44** ("Pencils", the user's fresh decision of 2026-09-17 — §
    "Arc 44's decisions" below): "no width choice, no colour" is withdrawn — the face offers six
    greyscale shades and twelve leads, plus a gel pen. "No tilt" stands (the bake is upright since
-   g-paper 0.1.35), which is exactly why a chosen tone and lead are the only way to shade a
-   sketch on Supernote.
+   g-paper 0.1.35), which is exactly why a chosen tone is the only way to shade a sketch on
+   Supernote. **Amended again by arc 46** ("Palette", 2026-09-19): the width choice is withdrawn
+   — one 4 px lead — and the shades are the whole sixteen-level ladder, for the pen too.
 4. **Eraser — the rubbing eraser** (g-paper's `RasterRubbing`, 12 px). Live lifting on Supernote
    was a measurement, not a design choice going in; K1 found it real.
 5. **Export — the sketch is its own page**, after the ink page, in PDF/PNG export. Document-source
@@ -158,8 +179,10 @@ value are given.
 6. **Memory** — remembered on the device: two `ISketchHost` tails, `API_VERSION` 18 → 19; the host
    keeps it in device-local prefs, one setting for all notebooks, never in the `.soil`, never in a
    backup.
-7. **Pen glyph** — Tabler `ballpen` → `ic_ballpen` in `:sn-screen`'s shared drawables, hint "Pen".
-   `ic_pen` (Tabler's pencil) stays on the Pencil.
+7. **Pen glyph** — Tabler `ballpen` → `ic_ballpen` in `:sn-screen`'s shared drawables, hint "Pen"
+   (**since 2026-09-22 the ballpen is `ic_pen` itself** — the pen glyph everywhere a pen is meant,
+   on every writing face too — and the pencil glyph is `ic_pencil`; `ic_ballpen` no longer exists).
+   Tabler's pencil (then `ic_pen`, now `ic_pencil`) stays on the Pencil.
 8. **Naming** — Arc 44 "Pencils" · Notesprout branch `pencils` · g-paper branch `pencil-tones` ·
    letter T · `PENCILS_PLAN.md`.
 9. **Models** — Fable orchestrates, writes the AIDL seam and reviews every g-paper diff and every
@@ -200,6 +223,77 @@ The user's, locked in `INK_PLAN.md`; phase-start questions could not reopen them
    white gap ring says nothing against a white fill. This is arc 44's "white/highlight pencil"
    future, decided.
 
+### Arc 46's decisions (2026-09-19)
+
+The user's, locked in `PALETTE_PLAN.md`; phase-start questions could not reopen them:
+
+The first Nomad walk (the same day) amended 2, 4 and 5 and added 9 — both the opening value and
+the final one are given.
+
+1. **No size choice.** One pencil width, "the size of a real pencil, whatever Atelier uses":
+   **4 px** (`SketchPalette.PENCIL_WIDTH_PX`, arc 44's third lead; **1 px since 2026-09-21** — "let's try a smaller stroke size", 4 → 2 → 1, walk pending). Atelier's nib was never
+   measured — its black HB reads back ~2.7 black px per px of stroke length on the Nomad
+   (g-paper `probe-ebc/README.md`) — so 4 px is walked against Atelier by hand, and the one
+   constant is the knob if it reads heavy. Withdraws arc 44's decision 3 (the twelve leads).
+2. **All sixteen greys** for the pencil, ladder levels 0–15; white stays the lightener lead.
+   Withdraws arc 45's decision 6 (the four tones) — that limit was the firmware needle's, and the
+   direct panel path dithers every level honestly. **Amended at the first walk** ("the shades seem
+   off from what Atelier has"): the sixteen are **Atelier's own tones**, verbatim — `ffffff dddddd
+   d0d0d0 c8c8c8 c0c0c0 b6b6b6 aaaaaa a0a0a0 909090 888888 808080 707070 686868 606060 505050
+   000000` — not the `0x11` ladder; `SketchPalette.TONES`, darkest first so 0 is black and 15 white
+   as every earlier build stored them; the pencil's default is `#505050` (level 1, arc 43's exact
+   tone).
+3. **The gel pen takes the same sixteen-shade choice, white included** — the user's explicit
+   choice over a fifteen-shade pen. (It drew nothing under `DARKEN`; decision 9 is what makes it
+   a pen.)
+4. **Swatches Atelier's way**: a filled circle of the shade, a white gap, a **dotted** black
+   outer ring on every swatch; the **selected** swatch's outer ring is **solid**. **Amended at the
+   first walk**: **4 × 4**, not two rows of eight, white at the top left as Atelier lays them out.
+5. **Its own button and panel** — opened as a top-bar Palette button (Tabler `palette`, "Shades",
+   after the eraser). **Withdrawn at the first walk**: "since pencil and pen have independent shade
+   selections, it makes better sense to just attach the selection to the tool … my idea for the
+   separate toolbar button was based on Atelier, and now I realize that doesn't make much sense."
+   **Final**: the panel hangs under the **armed pen button on its re-tap** — the Pencil's for the
+   pencil's shade, the Pen's for the pen's — on the top bar and on the mini row alike; no palette
+   button, no overflow entry. It does not re-arm anything.
+6. **Both pen buttons wear their own shade**: the Pencil fill stays; the ballpen glyph gains a
+   fill body (`ic_ballpen_fill`, now `ic_pen_fill`) tinted with the pen's shade — on the top bar, the mini row, and
+   the corner knob while that kind is armed.
+7. **Naming** — Arc 46 "Palette" · branch **`tools`** (carried arcs 46–51; **merged to `main` 2026-09-24 and deleted**) ·
+   letter **Q** · `PALETTE_PLAN.md`. No `versionName` bump (version moves at a release).
+8. **Recipe** unchanged from arcs 43–45; no code review (the standing waiver).
+10. **The pen shows its true tone** (the second walk: "the panel is capable of showing the true
+   tone without dithering … if the dithering is just so the stroke keeps with the nib, can we
+   have it rebake with the true tone of the pen? I'm only asking about the pen tool, not
+   pencil") — g-paper **Phase 31 → 0.1.45**: baked ink is displayed at its grey, on the panel and
+   in the window; a live pen stroke still dithers so it lands under the nib; graphite stays a
+   dither throughout. Covers and exports were never dithered and are unchanged. **Amended on the
+   third walk** ("instead of on pen up … anything other than drawing will rebake with the correct
+   tone"): the mark stays dithered at pen-up and **settles** in tone at the next non-drawing
+   event — a tool or shade pick, a rub, an undo, a page load (g-paper Phase 32 → **0.1.46**), or
+   the face's own `paper.settleDisplay()` before the shade panel, a chrome flip or the collapsed
+   rows open (Phase 33 → **0.1.47**). **Amended 2026-09-21 (g-paper Phase 37 → 0.1.52):** a mark
+   settles **only** on a **one-finger swipe down** (`settleDisplay()`) or a page load — the tool and
+   shade picks, the rub, the undo, the chrome opens and the 2.5 s pause (Phase 35 → **0.1.50**)
+   all withdrawn: each landed a settle the hand had not asked for ("undesired side effects"). **And the pencil the same way** (the fourth
+   walk: "perhaps it will look more natural with real tones with the grain?" — Phase 34 →
+   **0.1.48**): a settled fleck shows at its own alpha in the lead's tone, grain in grey; the
+   dither is the live picture only.
+9. **Ink over graphite** (the first walk: "the white pen should be able to write over the pencil.
+   It correctly writes over the darker pen. In the real world, a white gel pen can write over
+   anything"; asked plainly and decided) — the flatten is **`SRC_OVER`, ink on top, everywhere**
+   the sketch is seen: g-paper **Phase 30 → 0.1.44** (`CanvasPaperView.drawRasterLayers`,
+   `DitherFlatten.luma` + `band`), the host's `SketchRaster` (export) and `SketchCover`. The
+   consequence, stated and accepted: **pencil drawn over an ink line is hidden by the ink** (real
+   graphite mostly slides off dry gel ink). With a black pen the two operators are pixel-identical,
+   so no existing page moves. **Amends arc 45's "no top and no bottom".**
+
+**Derived** (not re-asked): no g-paper change *at Q0–Q4* (decision 9 brought one) — `penColor` on a `PEN` contact already dithers
+live and bakes true grey into the ink raster (Phase 29), `penWidth` is plumbed unclamped and 4 px
+sits above every floor; the seam grows **one compatible parcel tail** rather than moving a floor
+(§ The seam); dropping the size menu removes the one place g-paper read `penWidth` un-latched
+mid-contact.
+
 **Derived** (reconciled from the G0 exploration, not re-asked): flatten = darken, everywhere the
 two rasters become one picture; routing by style, at the one `RasterLayer.of(style)` site; the
 rubber never allocates the ink raster; one contact touches one raster, so per-contact undo bytes
@@ -225,6 +319,46 @@ so RGBA).
 ---
 
 ## The data
+
+### Arc 47's decisions (2026-09-19/20)
+
+The user's, locked in `SIDE_PLAN.md`; phase-start questions could not reopen them:
+
+1. **Calibration first.** `probe-tilt` (a dependency-free g-paper app) walked on the Nomad and
+   the Manta before any curve: the Ratta HAL puts signed **tilt-X in degrees** in `AXIS_TILT`
+   and signed **tilt-Y in degrees** in `AXIS_ORIENTATION` (panel space, both live). The polar lean
+   is `hypot(x, y)`; the azimuth `atan2(y, x)` turned panel→screen (`EbcGeometry.screenAzimuth`;
+   the Nomad's 137° raw ≡ the Manta's 42°). The 2026-09-17 Manta bloom was this units bug, so
+   g-paper Phase 28 decision 5 ("the Supernote pencil stays upright") is **amended**: upright
+   for every ordinary grip, flank past a side threshold.
+2. **Threshold from the hand:** tip only ≤ **45°**, smoothstep bloom 45° → **54°**, full flank
+   past it. Writing never crossed 43° on either device; shading never dropped under 50°.
+3. **Flank extent 20× the lead** — 80 px on the 4 px lead (`FLANK_EXTENT`, the knob).
+4. **The flank pales as it widens** (`FLANK_LIGHTEN`, fitted to the user's own recorded
+   shading strokes, not a synthetic sweep).
+5. **Asymmetric**, because both Supernotes report a live lean direction: a one-sided capsule
+   from the tip along the azimuth toward the barrel, densest at the tip, trailing off
+   (`FLANK_TAIL_BARE`); a stroke dragged along its own lean stays thin. The user is
+   right-handed, which fixed the sign from the Manta data; both devices confirmed on walks.
+6. Arc 47 "Side", branch `tools`, letter R, `SIDE_PLAN.md`; g-paper Phase 36 → **0.1.51** on
+   branch `side-lead` (merged to g-paper `main` at the freeze). Same recipe; no code review.
+
+**As built (g-paper, no seam change).** `StrokePoint.azimuth` (a defaulted tail);
+`CanvasPaperView.sampleTilt`/`sampleAzimuth` capture seams (core defaults unchanged; Ratta
+decodes); `GraphiteGrain.Lead { ROUND, FLANK }` opt-in on `of`/`begin` — ROUND and every
+sub-threshold flank mark are bit-identical to before; `rasterDirtyWidth` seam so an 80 px band
+is not clipped from its own bake; `bakeTilt` passes the lean on the direct panel path, 0 on the
+needle fallback. Pressure was already live (Phase 28) and keeps its role.
+
+**Two walk findings that shaped it.** (1) The flank was clumpy on the device while the offline
+synthetic stroke was even: the cause was the **fan** of cross-sections on a turning path
+(stations 0.8 px apart; a hand's 0.24° median / 4.6° p95 turn per station slips the 80 px rim
+up to 6 px, so combs crowd then part — worms). Found only by rendering the user's real probe
+strokes (`FlankRenderHarness` + `GPAPER_PROBE_CSV`); fixed by depositing per unit of paper
+swept and splitting stations where the fan opens (`FAN_SPLIT_MAX`). (2) The sheet's tooth
+entered `catches` as an offset, which clamped light shading to nothing; the flank now takes it
+as a multiplicative depth (`FLANK_TOOTH_DEPTH`). Lesson kept: **test the grain on the hand's
+own recorded strokes, never a synthetic straight sweep.**
 
 ### The rows
 
@@ -335,7 +469,8 @@ cross-notebook paste into a non-Sketch notebook carries **both** rows along and 
 `MIN_API_VERSIONS` — no existing floor moved), → **18** at K5b for a compatible **method** tail
 (`SketchContract.MIN_API_VERSION_FOR_SKETCH_PAGES = 18`, gating five later `ISketchHost` methods),
 → **19** at T2 for another compatible method tail (`MIN_API_VERSION_FOR_SKETCH_TOOLS = 19`) —
-and, at **arc 45 / G2**, → **20**, where the birth floor itself finally moves:
+and, at **arc 45 / G2**, → **20**, where the birth floor itself finally moves (and at **arc 46 /
+Q1**, → **21**, a parcel tail — § "Q1's tail" below):
 `MIN_API_VERSION_FOR_SKETCH` **17 → 20**. This one is not a tail — the point's own chunk-transfer
 codes 3–4 (`readSketchChunk`/`saveSketchChunk`) **changed shape in place** to take a layer rather
 than growing a new pair beside them, so a host or screen on either side of the break simply never
@@ -351,7 +486,7 @@ earlier "first ever" claim to that).
 manager's shape): nothing here has anything of its own to remember. The bookmark is the notebook's
 own page and undo is in-session and dies with the showing; a store lent here would still be an
 empty file and a binder to revoke, for nothing. **The one thing that does persist — which tool is
-armed, and the pencil's shade and lead (arc 44 / T2) — crosses as three small indices on the held
+armed, and the pencil's and the pen's shades (arc 44 / T2, arc 46 / Q1) — crosses as small indices on the held
 `ISketchHost`** rather than through a store of the face's own: `toolSettings()` /
 `putToolSettings()` are two more tails on the *host's* binder, answered from the host's own
 device-local prefs, never from a file this extension owns.
@@ -380,7 +515,8 @@ interface ISketchHost {
     int    pageContent(String pageKey);                     // bit 1 ink/objects, bit 2 document
     SketchPageState undoPage(String token);
     SketchPageState redoPage(String token);
-    // T2 — method floor 19 (history; inert below the action floor of 20):
+    // T2 — method floor 19 (history; inert below the action floor of 20); the parcel grew a
+    // fourth int, penShade, at arc 46 / Q1 (MIN_API_VERSION_FOR_SKETCH_PEN_SHADE = 21):
     SketchToolSettings toolSettings();
     void   putToolSettings(SketchToolSettings settings);
 }
@@ -472,9 +608,10 @@ the action floor to 20, above this one too):
 
 - **`toolSettings(): SketchToolSettings?` / `putToolSettings(settings)`** — what this device last
   remembered the face's tools to be, and how the face pushes a new pick. **What crosses is
-  indices, never values**: `SketchToolSettings(tool, shade, size)` is three small `Int`s, each
-  bounded `0..SketchContract.MAX_TOOL_SETTING_INDEX` (255) — a **sanity** bound on an unmarshalled
-  integer, not the palette's own size. The host never learns how many shades or sizes exist, never
+  indices, never values**: `SketchToolSettings(tool, shade, size, penShade)` is four small `Int`s
+  (three until arc 46 / Q1), each bounded `0..SketchContract.MAX_TOOL_SETTING_INDEX` (255) — a
+  **sanity** bound on an unmarshalled integer, not the palette's own size. The host never learns
+  how many shades exist, never
   clamps a value against a palette it does not know, and a stored index this build no longer
   offers is not a wire error — `SketchToolState.fromSettings` reads it as an ordinary miss and
   falls back to that field's own default.
@@ -483,21 +620,43 @@ the action floor to 20, above this one too):
   exception; the defaults live in `SketchToolState` on the face's side precisely so that answer
   can be given honestly.
 - **The host never clamps or knows the palette.** `SketchToolCodec.decode` (the pure half of the
-  host's prefs) repeats none of `SketchToolState`'s bounds; it only reads three stored integers as
-  a legal `SketchToolSettings` or answers null. Retuning a shade or a lead, or shortening the
-  ladder, is a change inside `:ext-sketch` alone.
+  host's prefs) repeats none of `SketchToolState`'s bounds; it only reads the stored integers as
+  a legal `SketchToolSettings` or answers null. Retuning a width or a shade, or changing the
+  offered ladder, is a change inside `:ext-sketch` alone.
 - **The eraser is never remembered.** It is not a field of `SketchToolSettings` at all — a face
   that opened on the eraser would read as a broken pencil, and remembering it would need a fourth
   index for no reason the seam can name.
 - **`SketchToolPrefs`** (`data/prefs/SketchToolPrefs.kt`) is the host's own device-local store:
   `SharedPreferences("sn_sketch_tools")` — deliberately **not** `sn_tool`, the name
   `SnApplication.LEGACY_TOOL_PREFS` deletes at every process start — one setting for every
-  notebook, never the `.soil`, never a backup. `put` is one `edit()`/`apply()` of all three keys,
-  so a reader can never see a new shade against an old size.
+  notebook, never the `.soil`, never a backup. `put` is one `edit()`/`apply()` of all four keys,
+  so a reader can never see a new pencil shade against an old pen shade.
 - **Pushed on every pick, fire-and-forget, on IO under a fair mutex.** `SketchActivity`'s
   `toolPushes` mutex serialises the pushes in pick order — Fable's one T3 review fix, after two
   quick picks raced on separate IO hops and left the device remembering the first of the two
   rather than the second.
+
+### Q1's tail (arc 46)
+
+Added arc 46 / Q1 (2026-09-19), `API_VERSION` 20 → **21**, named by
+`SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE` = 21 — **a parcel tail, not a method**:
+
+- **`SketchToolSettings` grows a fourth `int`, `penShade`** (the gel pen's ladder level, 0 =
+  black), after `size`, read with the exhausted-parcel rule (`SketchPageState.structuralToken`'s):
+  a three-int parcel from a 20 host reads as pen shade 0, and a four-int parcel handed to a 20
+  host leaves one int unread. Neither side is broken, so **no floor moves** —
+  `MIN_API_VERSION_FOR_SKETCH` stays 20 and a 20 screen still binds; the constant is named the
+  way the method floors are, as the ledger of when the field arrived, and `:ext-sketch` declares
+  21 because it is what it requires of the host.
+- **`size` is a dead slot from arc 46 on.** The face offers one pencil width, writes 0 there and
+  never reads it back; removing it would be an in-place shape change and would move the point's
+  action floor for nothing. A remembered size from arc 44 is simply not read.
+- **Host prefs**: a fourth key `pen_shade`; `SketchToolCodec.decode` reads a **missing** pen shade
+  as 0 (the tail's own default, the exhausted-parcel rule mirrored in the file) so a device
+  upgraded from arc 44/45 keeps its tool and pencil shade; any *present* value that cannot be an
+  index still refuses the whole answer, as before. The host still never clamps.
+- A contract test asserting this floor is **above** the action floor is the correct sense (the
+  reverse of G2's inversion, § Traps).
 
 ### `SketchHostSession` and `SketchHostBinder`
 
@@ -547,58 +706,182 @@ a *raster page* is.
 (see Traps).
 
 **Tools.** `pageMode = RASTER` before any content loads; the toolbar carries three tools — Pencil ·
-Pen · Eraser (arc 44 / T3) — over `RasterRubbing()` defaults, **nothing set in the removed
-`RattaTuning`** — the K1 measurements are the engine's own defaults now. Both pens are `Tool.PEN`
-to g-paper; which kind is armed, and the pencil's own shade and lead, live in `SketchToolbar`'s
-`SketchToolState` and are applied to the engine as `penStyle`/`penWidth`/`penColor` — never a
+Pen · Eraser (arc 44 / T3) — over
+`RasterRubbing()` defaults, **nothing set in the removed `RattaTuning`** — the K1 measurements are
+the engine's own defaults now. Both pens are `Tool.PEN` to g-paper; which kind is armed, and each
+kind's own shade, live in `SketchToolbar`'s `SketchToolState` and are applied to the engine as
+`penStyle`/`penWidth`/`penColor` — never a
 second tool for g-paper to know about. `smartLassoEnabled = false`, `scribbleEraseEnabled = false`
 (hatching is not a gesture); `collapsedTools()` still answers `[PEN, ERASER]` — two slots, not
 three — because the PEN slot itself carries **both** kinds via `collapsedPenKinds()`
 (`CollapsedChrome.PenKinds`), so the collapsed mini row reads Pencil · Pen · Eraser, the top bar's
 own order, with no change to how many tools the base class thinks this screen has. Overflow behind
-`…` is unchanged: Back · Bring in ink · Show pages. There is no `EraserBar` — Point and Lasso are
-stroke erasers, and a raster page has neither.
+`…` is unchanged: Back · Bring in ink · Show pages. There is no `EraserBar` — Point and Lasso are stroke erasers, and a raster page has neither.
 
-### Tools (arc 44)
+**Always dithered (2026-09-22, g-paper Phase 41 → 0.1.55).** The Supernote panel shows the
+dither always — pencil and pen, a loaded page included — and nothing settles: `RattaPaperView.
+DISPLAY_SETTLES` is false, `settleDisplay()` is a no-op there, and the face's swipe-down binding
+below is gone (the gesture is unassigned on this surface again). The page images, the covers and
+every export keep the true greys, so **the glass is the dither and the export is the tone** — the
+user's word with both pictures side by side: "the dither looks great on the device, and the true
+tone looks great on the Mac. But the dither looks awful on Mac and the true tone doesn't quite
+look right on the device." Existing sketches show dithered from their next load; their stored
+pixels are untouched. The paragraph below is history.
 
-- **`SketchPalette`** (`:ext-sketch`, pure Kotlin) is the one place the greys and the widths are
-  written down. A stored shade is **a level of the e-paper ladder (0–15), never a position in
-  `SHADE_LEVELS`** — the list of levels this build offers, `listOf(0, 5, 9, 15)` since 2026-09-18
-  (black, grey, light grey, white — the six of arc 44 before that) — so the level means the same
-  thing whichever subset a build happens to offer, and `SHADE_LEVELS` is the one line to change to
-  offer a different set; a device remembering one of the dropped six reads as the default.
-  `WHITE_SHADE` (15) names the lightener for its hint. `ROW_BREAK` (8, decision 5's "8 over 7"
-  when there were fifteen shades) is inert at four offered levels — the row simply never reaches it — and
-  is kept as the rule `shadeRows()` derives from rather than deleted. `SIZE_ROW_BREAK` = 6 is where
-  the twelve lead widths wrap onto their second row. `PEN_WIDTH_PX` = 5 (px) is the gel pen's one
-  width, settled at T3's walk.
-- **`SketchToolState`** (`:ext-sketch`, pure Kotlin) is the armed kind plus the pencil's shade level
-  and size index — three fields, one seam parcel (`toSettings()`/`fromSettings()`). Both kinds are
-  `Tool.PEN` to g-paper, so "which pen is armed" has nowhere else to live; the shade and the lead
-  are kept **through** a switch to the gel pen and back — picking the pen is not forgetting the
-  pencil. Every field read from outside (a remembered index, a level this build no longer offers)
-  comes in through `of`/`fromSettings` and falls back to its own default independently, never the
-  whole state at once. `reportedShade` is the pencil's own shade **whatever kind is armed** — what
-  makes the Pencil button's report different from the engine's actual `penColor`.
-- **`PencilBar`** (`:ext-sketch`, over `:sn-screen`'s `AnchoredBar`) is the pencil's own options bar,
-  the `EraserBar` pattern applied to three rows instead of one. A shade swatch is not an icon
-  button: it is a black ring with the grey itself as the fill, painted in `onDraw` rather than a
-  drawable, because the fill has to read at every level offered — the selected swatch alone gains a
-  **white gap ring** between the ring and the fill, the mark that works on `#000000` and every
-  grey, plus (2026-09-18) a **black hairline at the fill's edge**, the mark that works on the
-  white lead — against which the gap ring is nothing at all. A size dot is a **legible dp ladder, never the literal px** — 1.2 px
-  would be a single dark pixel and 96 px would not fit a cell, so the twelve widths are drawn on a
-  ladder linear in the index, clamped to the cell so it holds at both button tiers. Re-tapping the
-  armed Pencil opens the bar under it; it **stays open after a pick** — a visit is usually "this
-  grey, that lead" — and closes on the Pencil's own re-tap, any tool change, a page swap, a finger
-  gesture, a chrome flip, a contact outside it, or the exit; every dismissal path is in T3's ledger.
-- **`PencilIcon`** (`:ext-sketch`) is a `LayerDrawable`: `ic_pen_fill`'s body, tinted with the armed
-  shade, under `ic_pen`'s untouched black outline — how the Pencil button "reports the armed shade"
-  (T3's phase-start answer): black armed reads as a fully black pencil, every other level as a black
-  outline with that grey inside it. Worn by the top bar's own Pencil button, the collapsed corner
-  knob, and the mini row's pencil alike — one recipe, not three spellings of it. The fill stays put
-  while the gel pen or the rubber is armed, because a button says what a tap on it will bring back.
-- **`ic_ballpen`** (`:sn-screen`, Tabler's `ballpen`) is the gel pen's glyph, in the shared
+**The settle gesture (2026-09-21, withdrawn 2026-09-22).** A **one-finger swipe down** on the page called
+`paper.settleDisplay()`: every mark still on the glass as the dither it was drawn under goes to
+its true tone — the pen's line solid, the pencil's grain in grey. It is `PageGestures.onSwipeDown`,
+the notebook's Contents gesture, which this surface never used (a sketch has no Contents); the
+face overrides it in `gestureListener`. It replaces the 2.5 s pause settle (g-paper Phase 35 →
+0.1.50), withdrawn in **0.1.52** (Phase 37) on the user's word — a settle the hand did not ask for
+landed where it was about to draw. Pen-gated by the detector like every finger gesture; a finger is
+never the pen, so the settle posts straight to the panel; with nothing waiting it is a no-op. The
+**It and a page load are the only settles** (first-walk amendment the same day: "only … the swipe
+gesture, page flip, or closing the sketch. No longer on tool change"): a tool or shade pick, a rub,
+an undo and the chrome opens no longer settle — g-paper's setter and raster-change settles are
+gone, and the face's, `PaperScreenActivity.toggleChrome`'s and `CollapsedChrome.open`'s calls to
+`settleDisplay()` with them (their reason, a setter settle painting over a freshly opened panel,
+no longer exists). Closing the sketch needs nothing: the notebook shows the flattened rasters.
+
+**The smudge (arc 48, 2026-09-22 — COMPLETE + FROZEN the same day on four Nomad hand walks).** A **one-finger back-and-forth** on the page rubs the
+graphite under it the way a finger blends pencil on paper: separate lines run together into a
+tone. It is not a tool and never the stylus — the user's word: "a single-finger gesture of a
+natural rub feel … rapid and in short distances, so it doesn't trigger the swipe gesture" — and it
+touches the **pencil only**: the ink raster is never read, never allocated, never announced (the
+rubber's rule, held by the same construction). It **blends and redistributes, never lifts and never
+clumps**: under the finger every graphite pixel is pulled toward the mean of its neighbourhood
+(g-paper Phase 40 → **0.1.54**, `RasterSmudge`: a box of `spread` px on premultiplied channels, so
+bare paper lends emptiness and never colour; `strength × coverage` per batch over the rubber's own
+feathered corridor; `loss` pales it a little after the blend, as a real smudge does; the graphite the
+blur pushes past the corridor's edge is the other honest paling). **Once per pixel per pass**, again on
+each reversal of travel — the rubber's pass mask, so a dense digitizer or a slow hand blends no
+more than a quick one (the first Nomad probe compounded per batch: 240 batches for eight strokes
+of the arm left 1 % of the tone). `RasterSmudging(strength 0.45, spread 6, feather 0.5, loss 0.02, gamma 3, carry 40, deposit 0.5)`
+and `smudgeRadius` 32 px (a fingertip at 300 ppi) are the knobs, set on the engine's defaults.
+**`gamma` is the tone it converges to** (the user's first walk: "it looks like it is removing it"):
+the pencil lays sparse dark flecks and the eye reads a hatch by them, so their plain mean spread
+evenly across the corridor is a pale wash; the target is the mean of darkness raised to `gamma`
+and brought back by the root — at 2 the root mean square, so a hatch settles denser than its
+mean, the way crushed graphite reads, and an even corridor is its own fixed point. **Cost is the
+swept area** (g-paper's per-segment coverage field, samples thinned under 2 px, batches chunked
+at 16, a warn line over 30 ms): the first build tested every pixel against every segment and the
+user's real finger hung the Nomad 12 s on one event — an ANR that closed the face, not a crash.
+**The finger carries graphite** (the second walk: "it should be able to smudge out past the
+boundary … a gradient depletion … just enough to dirty the paper under it"): the darkest local
+tone under the finger's core is its load; it decays by `e^(−travel / carry)` px of travel, is
+topped up wherever the finger crosses something darker, and under the finger a pixel is pulled at
+least to `deposit` of it, in the load's colour where the pixel has none of its own — so a rub out
+of a mark leaves a fading trail about three carries long. `gamma` went 2 → 3 the same walk ("too
+light … closer to the original").
+
+The recogniser is the face's (`SmudgeRub`, pure Kotlin): a sequence that began on one finger, on
+the page, with the pen gate open arms on the first **reversal of travel** — hops of
+`SMUDGE_HOP_PX` 10 px, a turn past 120° — while the finger is still within `SMUDGE_ARM_WITHIN_PX`
+280 px of where it landed. A swipe goes one way and never arms; a swipe that bounced turns back far
+from home and never arms; the swipe's own floor is 30 % of the axis (421 px on the Nomad), so the
+two cannot meet. The samples before arming are delivered as the first batch, so the rub's first
+stroke smudges too. It is fed from `SketchActivity.dispatchTouchEvent` **before** the base feeds
+`PageGestures`, and `standDown = { smudge.active }` stands every page gesture down on the event
+that armed it (the detector cancels all and ignores the rest of the sequence). The gate
+(`!paper.isPenActive`) is re-asked at the turn and on every batch — a pen arriving mid-rub ends the
+smudge; a second finger ends an armed rub and kills an unarmed one; a lift ends it.
+
+On the engine side the sweep is the rubber's with the arithmetic swapped: `beginSmudge()` →
+`smudgeAlong(points)` per batch (the previous batch's last sample chained on) → `endSmudge()`. Each
+batch announces `onRasterWillChange(GRAPHITE, rect)` → blend → `onRasterChanged(GRAPHITE, rect)`,
+so the face's per-contact undo entry ([Undo](#undo)) and the save governor need nothing new;
+`endSmudge()` fires `onPenLifted`, which closes the entry. On the Nomad the blended corridor goes
+straight into the panel per batch (`onRasterSmudgedBatch` → `toneAndPost`, the rubber's posting);
+a smudge settles nothing that is waiting (Phase 37's rule — the swipe down still does that).
+`extensions/sketch/SMUDGE_PLAN.md` is the plan + ledger. **Debug builds carry a probe**: the
+broadcast `<ext pkg>.SMUDGE_PROBE --ei x --ei y --ei half --ei passes --ei step --ei hist`
+synthesises a finger back-and-forth through `dispatchTouchEvent` (window coordinates), and
+`<ext pkg>.SKETCH_DUMP` writes the page as the export sees it (`renderToBitmap`, true grey) to
+`files/dump/page.png` in the extension's external files dir for `adb pull`, because
+`adb shell input` takes about a second per event — the long-press fires first — and the touch
+node is not shell-writable. Release never compiles it in.
+
+**The stump (arc 50, 2026-09-22/23 — COMPLETE + FROZEN 2026-09-23 on the user's six Nomad walks;
+g-paper `smudge-tool` merged to g-paper `main` and deleted).** Two things, on the user's word. **The smear follows the hand** (g-paper Phase 45 → **0.1.60**): the neighbourhood a
+pixel is pulled toward is no longer a square box but the box **turned to the batch's line of
+travel** — `RasterSmudge.axis` is the sweep's principal axis (the structure tensor of its
+segments, so an out-and-back batch reads as one line rather than as no displacement), and the
+mean is gathered over `spread` px to either side along it and `RasterSmudging.across` px
+(default 2) to either side across it. A rub left and right runs a vertical hatch together; a rub
+up and down along its lines only streaks each line along itself; a diagonal rub follows the
+diagonal. A batch with no travel (a dwell) keeps the square box. **And a stylus Smudge tool**:
+`Tool.SMUDGE` in g-paper drives the same `beginSmudge` → `smudgeAlong` → `endSmudge` from the
+nib, within `smudgeToolRadius` — **24 px** (16 on the first walk, "too fine"), a stump — the firmware
+painting nothing under it (Ratta's `firmwareInkSuppressed`, Onyx's raw pipeline off). On the
+face: `btnSmudge` after the rubber on the top bar (Tabler `hand-finger`, `ic_smudge`, "Smudge"),
+third on the mini toolbar, `PaperToolbar`'s defaulted `btnSmudge`, `CollapsedTools.ORDER` with
+SMUDGE after ERASER; never remembered (the rubber's rule). **The finger's rub stays available
+under every tool** — it is a gesture, and this button arms the stylus for the same work, which
+amends arc 48's decision 3 by adding to it, not replacing it. **The walks reshaped it** (the
+ledger in `STUMP_PLAN.md`): `across` 2 → 4 and `loss` 0 (the first export paled to nothing); the
+gathered oriented kernel cost 2–3 s an event → the axis quantized to the lattice's four and the
+mean run **separably** (`quantizeAxis`, `lineMean`); the smear made **one-sided and travel-gated**
+(a pixel takes on what lies behind it along the travel, the corridor clipped behind the landing,
+no smudge until the nib moves — "if the stroke is only down, the smudge should only go down");
+and **tip-switch chatter** at stump pressure (four contacts a second on a light fast rub) answered
+twice — the window mirror deferred and coalesced on the direct path (`RattaPaperView.
+SMUDGE_MIRROR_DELAY_MS` 400) and a chattering contact continuing the same undo entry
+(`SketchActivity.SMUDGE_CHATTER_MS` 300). The same walks found the **save deadline** (§ Saves).
+`extensions/sketch/STUMP_PLAN.md` is the plan + ledger.
+
+### Tools (arcs 44–46)
+
+- **`SketchPalette`** (`:ext-sketch`, pure Kotlin) is the one place the two widths and the two
+  kinds' defaults are written down — **the tones themselves are `:sn-screen`'s `core/InkTones`
+  since arc 49 / P4** (the writing faces took the same sixteen), and `TONES` / `SHADE_LEVELS` /
+  `isShade` / `shade` / `shadeRows` read through it unchanged in meaning. **`TONES` is Atelier's sixteen, darkest first** (decision 2 as amended:
+  `000000 505050 606060 686868 707070 808080 888888 909090 a0a0a0 aaaaaa b6b6b6 c0c0c0 c8c8c8
+  d0d0d0 dddddd ffffff`), and a stored shade is **a level — a position in `TONES` — never a
+  position in `SHADE_LEVELS`**, the list of levels this build offers (all sixteen). Kept darkest
+  first so 0 is black and 15 is white, the two values every earlier build stored (the `0x11`
+  ladder before arc 46 had the same ends). `SHADE_LEVELS` is the one line to change to offer a
+  different subset; a device remembering a level a build lacks reads as that kind's default.
+  `BLACK_SHADE` (0) and `WHITE_SHADE` (15) name the two ends for their hints. `ROW_BREAK` = **4**:
+  `shadeRows()` is **four rows of four, white first** (Atelier's order, `SHADE_LEVELS.asReversed()`
+  chunked). **There are no sizes** (decision 1): `PENCIL_WIDTH_PX` = **4** is the pencil's one
+  lead and `PEN_WIDTH_PX` = 5 the gel pen's one width, settled at T3's walk. `DEFAULT_SHADE` =
+  **1** (`#505050`, arc 43's exact tone) is the pencil's default, `DEFAULT_PEN_SHADE` = 0 the
+  pen's; `shade(level, fallback)` folds an unoffered level onto the fallback the caller names, so
+  each kind falls to its own.
+- **`SketchToolState`** (`:ext-sketch`, pure Kotlin) is the armed kind plus **a shade per kind** —
+  `tool · pencilShade · penShade`, one seam parcel (`toSettings()`/`fromSettings()`, `size`
+  written 0 and never read). Both kinds are `Tool.PEN` to g-paper, so "which pen is armed" has
+  nowhere else to live; each kind's shade is kept **through** a switch to the other and back —
+  picking the pen is not forgetting the pencil, and a grey chosen for the pen is not the
+  pencil's. `withShade(level)` moves the **armed kind's** shade only; `armedShade` is what the
+  panel paints as selected; `pencilReport` / `penReport` are what the two glyphs wear, **whatever
+  kind is armed** — a button says what a tap on it will bring back. Every field read from outside
+  comes in through `of`/`fromSettings` and falls back to its own default independently.
+- **`PaletteBar`** (**`:sn-screen`'s since arc 49 / P4**, over its `AnchoredBar`; arc 44 / T3's
+  `PencilBar` remade; takes `armedLevel` / `onPicked(level)` and does not know whose shade it
+  edits — this face passes `toolbar.state.armedShade` and `withShade(level)`) is the shade panel, the `EraserBar` pattern applied to four rows of four. A swatch is not
+  an icon button: **Atelier's shape** (decision 4) — the grey itself as a filled circle with a
+  1 dp black hairline at its edge (what makes the white lead a circle against the white bar), a
+  white gap, and a 2 dp black outer ring, **dotted** (`DashPathEffect`, 2 dp on / 2 dp off) on
+  every swatch and **solid** on the selected one — painted in `onDraw`, because the fill has to
+  read at every level offered and a cell border says nothing on black. The bar is hung under the
+  **armed pen button by its re-tap** — the Pencil's for the pencil's shade, the Pen's for the
+  pen's, on the top bar or the mini row (`PaperToolbar.onPenReTap(alt)` and
+  `CollapsedChrome.PenKinds.onReTap(alt, anchor)`, both taking the kind since arc 46; the mini
+  row's alt button is its own anchor); it **stays open after a pick** and closes on that button's
+  next re-tap, any tool change, a page swap, a finger gesture, a chrome flip, a contact outside
+  it, or the exit — every dismissal path is in T3's ledger, unchanged. It edits the armed kind's
+  shade and re-arms nothing.
+- **`ShadeIcon`** (**`:sn-screen`'s since arc 49 / P4**; arc 44 / T3's `PencilIcon` generalised) is a `LayerDrawable`
+  recipe: a fill body (`ic_pencil_fill` / `ic_pen_fill`), tinted with that kind's shade, under the
+  untouched black outline (`ic_pencil` / `ic_pen`) — `pencil(ctx, ink)` and `pen(ctx, ink)` are
+  the two glyphs it knows. Black reads as a fully black glyph, every other level as a black
+  outline with that grey inside it. Worn by the top bar's two pen buttons, the mini row's two, and
+  the collapsed corner knob (the armed kind's — `CollapsedChrome.PenKinds.primaryIcon` /
+  `altIcon`, the latter arc 46's one `:sn-screen` addition beside `syncAltPen`) — one recipe, not
+  four spellings of it. Each fill stays put while the other kind or the rubber is armed.
+- **`ic_pen`** (`:sn-screen`, Tabler's `ballpen`; named `ic_ballpen` until 2026-09-22, when the
+  ballpen became the pen glyph everywhere and the pencil glyph became `ic_pencil`) is the gel pen's glyph, in the shared
   vocabulary rather than `:ext-sketch` alone, beside `PaperToolbar`'s new `btnAltPen` /
   `altPenArmed` / `onPenKindPicked` / `onPenReTap` (a defaulted, trailing parameter set — every
   existing caller with one pen is unchanged) and `CollapsedChrome`'s `PenKinds` (the alt button
@@ -731,7 +1014,13 @@ extra rule needed (`SketchRouting`'s own KDoc).
 
 `SketchHostHooks.target` (`@Volatile`) is the host's memory of **where the face is** — moved only by
 `requestPage`/`insertPage`/`deletePage`, restored from saved state on a reconnect, falling back to
-the displayed page if the face's target no longer exists. **The two undo histories are one
+the displayed page if the face's target no longer exists. **Every move also writes the notebook's
+last-opened pointer** (`rememberLastOpened` → `NotebookSession.saveLastOpened`, 2026-09-19, the
+user's finding): the notebook screen's own pointer writes run at its `onStop` and `close()`, and
+that screen is stopped for the whole life of the face — so a notebook killed by the system while
+the face was up used to reopen at the page the face *opened* at. A failed write is a log line and
+never fails the move. Verified on the Nomad: page 2 → two turns → both processes force-stopped →
+relaunch opened on page 4. **The two undo histories are one
 history**: a page insert or delete is recorded on the **notebook's own** undo stack
 (`NotebookUndo.Action.Page`, via `onStructural`, posted to Main since the hook runs on a pooled
 Binder thread) so the notebook's own undo still restores it after Show pages — but a small
@@ -772,8 +1061,14 @@ leaving with the newest pixels unwritten. Completion bookkeeping and the retry b
 **per layer**, but the retry itself is **one beat for the whole page** — a page with both rasters
 dirty gets one retry tick, not two racing ones.
 
-**Cadence**: 3 s pen-idle-gated debounce; a failed push retries after 2 s; flush points are a page
-turn/insert/delete, `onPause`, Back, and Show pages. Each save is a **Main-thread bitmap copy** →
+**Cadence**: 3 s pen-idle-gated debounce **with a deadline** (`SketchSaveCadence`, arc 50 walk 4,
+2026-09-23): from a page's first unsaved change it may stay unsaved **15 s** at most — the debounce
+wait is the shorter of its 3 s and what is left to the deadline, and past the deadline the idle gate
+is bounded: 5 s for the pen to go idle, then 5 s for the next pen lift (`SketchSaver.notePenLifted`
+from `onPenLifted`), then the copy is taken regardless. Before this, every change restarted the
+3 s and hover held the gate, so a hand that kept working never saved until it paused and lifted
+away — 100 s of smudging went with a force-stop on the walk. A failed push retries after 2 s;
+flush points are a page turn/insert/delete, `onPause`, Back, and Show pages. Each save is a **Main-thread bitmap copy** →
 WebP encode on IO → chunked push under the one push lock (one push in flight at a time, ever, for
 the whole page). Encoding is `RasterImage.compressLossless`: `Bitmap.CompressFormat.WEBP_LOSSLESS`
 on API 30+, `WEBP` at quality 100 on 29 (documented lossless there; `minSdk` is 29). The `quality`
@@ -907,7 +1202,8 @@ and the bake writes a **plain white page of the page's own size** (`SketchRaster
 rather than closing the bundle short by one page. `SketchRaster.toWebp(w, h, graphite?, ink?)`
 (arc 45 / G2: grew from one guarded blob to two optional ones) decodes **one raster at a time**
 (peak still two bitmaps alive together, one per raster, not more) and composites white, then
-graphite plain, then ink with `PorterDuff.Mode.DARKEN`, into `RGB_565`, plain white never the
+graphite plain, then ink plain **over** it (`SRC_OVER` since arc 46 / g-paper 0.1.44; `DARKEN`
+before that), into `RGB_565`, plain white never the
 template (decision 10). `ExportNaming.pageStem(sketch = true)` appends **` sketch`** to the ink
 page's own stem (`K7 - Heading.png` / `K7 - Heading sketch.png`) — the phase-start answer, so the
 two files sort together and the suffix never eats into the title's own cap; the exported file is
@@ -932,8 +1228,8 @@ recipe needed so two separate decodes both register onto the same card rather th
 silently sizing itself off the first. `sampleFor` is still the largest power-of-two `inSampleSize`
 that keeps the long edge at or above `CoverSnapshot.LONG_EDGE_PX`, so the decoder never allocates a
 full page for a 512 px card. Composited over opaque white (a transparent card would show the
-library's own background through the strokes) — graphite plain, ink `PorterDuff.Mode.DARKEN` over
-it, the same flatten as everywhere else. Falls back to the ordinary ink bake when the page carries
+library's own background through the strokes) — graphite plain, ink plain over it (`SRC_OVER`
+since arc 46; `DARKEN` before), the same flatten as everywhere else. Falls back to the ordinary ink bake when the page carries
 neither row, and only once the canvas has actually loaded (an unloaded surface's "bake" would be a
 blank card).
 
@@ -941,6 +1237,178 @@ blank card).
 cascades and takes its sketch with it.
 
 ---
+
+## Guides (arc 51)
+
+**Arc 51 "Guides"** (2026-09-23/24, branch `tools`, letter **J**, `GUIDES_PLAN.md` the plan +
+ledger, phases J0–J5; **COMPLETE + FROZEN 2026-09-24** on the user's Nomad hand walks; **`tools`
+merged to `main` 2026-09-24 (`--no-ff`) and deleted — "on tools" means `main`** — *"the grid
+(lines and dots), and the reference image and settings all work well"*) is the user's decision
+that a sketch page may carry two **guides** — tools for the artist that are never part of the
+sketch: a **grid** of lines or dots for laying out a scene (urban sketching: the same grid over a
+photo), and a **reference image** for tracing. Both are per page, stored in the `.soil` as rows
+parented to the page, shown or hidden per page, removed per page; **neither is ever exported,
+covered, erased, rubbed, smudged, or drawn into a raster** — the pencil, pen and eraser work over
+them through the rasters' alpha. **Amends decision 10** ("plain white, always; no template
+crosses the seam"): the paper is still white and no *notebook* template crosses, but the face lays
+its own guide sheet under the rasters. Not a reopening of `docs/templates.md`'s dropped
+"adjustable generators" — a sketch-only guide with a count, decided afresh.
+
+### Arc 51's decisions (2026-09-23 — never re-ask)
+
+1. **Recipe** — Fable orchestrates and reviews, **Opus 5.5 codes** (engine, host, face); JVM
+   tests; the user walks; no code review (the standing waiver).
+2. **Naming** — arc 51 "Guides", g-paper branch `sheet` (Phase 46 → 0.1.61), letter J (V is arc
+   25's), `GUIDES_PLAN.md`.
+3. **Grid geometry** — square cells, **one count across the page's width**, laid out symmetric
+   about the page's centre (equal partial cells at opposite edges); dots at the same cells'
+   corners.
+4. **Reference storage** — decoded and **fit once** (centred, `min(pw/sw, ph/sh)`, never
+   stretched), encoded at exactly the page's size with transparent margins as a **lossy WebP with
+   alpha, quality 90**; opacity a setting applied at draw time. No zoom, no orientation.
+5. **Chrome** — **one Guides button** (Tabler `grid-dots`, after Smudge, mirrored in the collapsed
+   overflow) and **one anchored panel of latches** — never steppers or sliders.
+6. **Hidden persists per page** (a stored flag; the count and the opacity are kept while hidden);
+   **Remove** deletes the row; grid and image may show together, the **grid over the image**;
+   nothing here is on the undo stack.
+7. **Values** (the walk knobs, all in `GuideSheet`): counts **2 · 4 · 6 · 8 · 12** over **16 · 20 ·
+   24 · 28 · 32**, two rows of five (the J4 walk grew the first six — 2·3·4·6·8·12 — to 24, then
+   32, then two rows, then dropped the 3); default Lines, 4; opacities **10 · 25 · 50 · 75 %**,
+   default 25; grid tone `#aaaaaa` (Atelier level 9), line 2 px, dot radius 4 px.
+
+### The sheet (g-paper Phase 46, 0.1.61)
+
+On a `PageMode.RASTER` page the Supernote direct panel path flattens graphite and ink over
+**hard-coded white** (`DitherFlatten` starts at 255) and never reads the template; a sibling View
+under the paper is never seen (the window fills opaque white and the panel is written directly),
+and `setTemplate` is in `renderToBitmap()`. So the underlay is a new engine input:
+**`PaperView.setSheet(bitmap?)`** — a page-sized ARGB bitmap with alpha, drawn over white and the
+template and **under graphite** (ink over both), **display only**: never in `renderToBitmap()`
+(the `forDisplay = false` branch), never in `getPageRaster`, never read by the rub or the smudge
+(both name `graphiteRaster` only); null clears; read 1:1 from the page origin, never stretched;
+held by reference like the template; a no-op on a stroke page. Ratta reads it as a **third band**
+wherever it reads the graphite band — `toneAndPost` under the nib, `ditherBand` for the display
+dither — through `sheetFor()` and never `flattenBase`, so a `directInk` stroke page never reads
+one; `DitherFlatten.luma(sheet, graphite, ink)` is white → sheet → graphite (the general blend) →
+ink, **bit-identical without a sheet** (every pinned test stood); the sheet is never *coverage*.
+A sheet change fires the whole-page `onRasterPixelsChanged(null)` through the same coalescer a
+load uses — one rebuild, one present — and the window shows it **dithered with the page** (the
+existing `ditherDisplay` path), never true grey under black dots. **Inside `clearForContentSwap`
+the page counts as gone whatever the sheet** (`swappingContent`), so the old pixels hold on the
+panel until the new page lands. A white gel pen covers the sheet; a full-page photo puts every
+pixel on the long path (about twice a blank page's rebuild).
+
+### The rows
+
+Two additive row types, parented to the page, `order = SKETCH_ORDER`, at most one live row of
+each per page: **`guide_grid`** (`SoilSchema.TYPE_GUIDE_GRID`; no blob; `text` = `GuideGrid
+{kind, count, visible}` as kotlinx JSON) and **`guide_image`** (`TYPE_GUIDE_IMAGE`; `blob` = the
+page-sized lossy WebP with alpha — `RIFF`/`WEBP`/`VP8X`, so **`ImageHeader.matches` guards it
+exactly as it guards a raster row**; `text` = `GuideImage {opacity, visible}`). `GuideRows` (pure
+codec + row builders; a foreign or unparsable row is null, never a throw), `GuideDao` (`gridFor`,
+a blob-free `imageDigest` carrying the text, `imageFor`), `GuideRepository` the **only writer**:
+minted on first use, rewritten in place (`createdAt` kept), identical bytes write nothing
+(`updatedAt` sacred), `GRID_OFF` soft-deletes the grid row, a stored image failing the guard is
+soft-deleted on read never overwritten, `SKETCH_TOO_LARGE` (6 MiB) / `SKETCH_BAD_IMAGE` write
+nothing, `WATCH_BYTES` a log line. **A new image row starts at opacity 0 and the face's
+`putGuides` right after fixes it** — the recorded order (save, then put). **Reads that must not
+see the rows:** `SoilDao.childrenOf` excludes both; `liveDescendantIds` **carries both** (page
+copy / cut / paste / delete / undo take the guides with the page); `liveErasableIds` leaves them
+out (Erase page never touches them; `pageContent`'s ink bit never lights); `hasLiveSketch`,
+`pagesWithSketch`, export, the cover and the document whitelists never name them, so a guide is
+excluded there by construction. `ClipMessages.tooLarge` names the sketch for a guide image too.
+**Never routed through `SketchRows.typeFor` / `SketchContract.LAYERS` / `SketchLayers.all`.**
+
+### J1's four tails (API 22)
+
+`ExtensionContract.API_VERSION` 21 → **22**, `SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES` =
+22 a **method floor** (T2's shape; the action floor stays 20; above the pen-shade floor, the
+correct sense for a live tail), `:ext-sketch` declares 22. Four `ISketchHost` tails after
+`putToolSettings` (transaction codes 14–17), `gate()` first in each:
+
+```
+SketchGuideState guides(String pageKey);             // parks the image in the GUIDE read window
+byte[]  readGuideImageChunk(int chunkIndex);         // that window alone
+void    putGuides(String pageKey, in SketchGuideSettings s);   // five small ints, no pixels
+void    saveGuideImageChunk(String pageKey, int i, in byte[] chunk, boolean last); // one empty chunk = Remove
+```
+
+`SketchGuideSettings` = `gridKind · gridCount · gridVisible · imageOpacity · imageVisible` —
+**indices and a percent, never pixels**, sanity-bounded at unmarshal (`MAX_TOOL_SETTING_INDEX`,
+`MAX_OPACITY_PERCENT` 100; a grid with no cells refused; `NONE` for a page with neither row); the
+host never learns or clamps against the face's ladders. `SketchGuideState` = `pageKey · settings
+(inline) · imageBytes · imageChunks` (pinned to `ByteChunks.countFor`; 0 bytes in one chunk = no
+image row; the exhausted-parcel tail rule kept for the next field). `SketchHostSession` grew a
+**third read window and a third accumulator**, independent of the two raster ones (a guide
+refusal leaves both raster accumulations untouched; a raster window swap leaves the guide window
+alone); `SketchHostBinder` serves the four through `hook {}`, logging bytes/chunks/ms and the five
+ints only; `SketchHostHooks.guides` / `putGuides` / `commitGuideImage` ride the existing
+Binder-thread pattern through `NotebookSession.readGuides` / `putGuides` / `writeGuideImage`
+(a dead key is `IllegalArgumentException("Unknown page")`). `docs/extensions.md` audit row 71.
+
+### The face
+
+- **`GridLayout`** (pure): cell = `pageW / count`; columns at `centre ± (offset + k·cell)` worked
+  in `Double`, `offset` half a cell for an odd count (even → a line on the centre; odd → the centre
+  mid-cell), rows taking the columns' parity, only positions strictly inside the page — **computed
+  from the centre outward, never `extent/count` accumulated** (`templates.md`'s trap).
+- **`GuideState`** (pure): the page's model — an off-ladder count or opacity reads as its default,
+  an unknown kind as Lines; `toSettings` / `fromSettings`.
+- **`GuideSheet`**: the knobs (`GRID_TONE`, `LINE_PX`, `DOT_RADIUS_PX`, `COUNTS`,
+  `COUNT_ROW_BREAK` 5 + `countRows()`, `OPACITIES`, `DEFAULT_COUNT`, `DEFAULT_OPACITY`,
+  `IMAGE_QUALITY` 90); `render(pageW, pageH, state, image)` → one page-sized `ARGB_8888` bitmap,
+  the image at `alpha × opacity` first, the grid over it, null when nothing is visible;
+  `fitToPage` (`:sn-screen`'s pure `ImageFit`, `TemplateFit.FIT`'s arithmetic — `:app` is
+  off-limits to the face); `encode` (`WEBP_LOSSY` q 90 on API 30+, `WEBP` q 90 on 29).
+- **`GuidesBar`** (over `:sn-screen`'s `AnchoredBar`, `PaletteBar`'s recipe): "Grid" — Off ·
+  Lines · Dots + the grid's eye; the counts in two rows; "Reference" — Pick (`ic_photo`) · Remove
+  (`ic_trash`) + the image's eye (`ic_eye` / `ic_eye_off`); the opacities. Latches are
+  `Widget.Notesprout.LatchButton` at the toolbar size; controls that make no sense are `GONE`,
+  never disabled; picking a kind, a count or an opacity also shows that guide; the bar re-places
+  itself as rows appear; stays open after a pick; dismissed exactly as the palette is; opening one
+  bar closes the other. The overflow entry has its own `onTap` (the top-bar button is hidden while
+  the chrome is collapsed, so the plain mirror could not open the bar).
+- **`SketchGuides`** (the wiring, so `SketchActivity` keeps only the hooks): `load(pageKey, w, h)`
+  in `loadPage` after `setTemplate(null)` and **before** the rasters — `guides()` on IO, the image
+  chunks joined and decoded behind `RasterImage.decode`'s header guard, the sheet built on IO,
+  `paper.setSheet` on Main (one coalesced rebuild); the replaced sheet recycled only after
+  `setSheet` has let go of it, under `sheetLock`; a failure of any kind is a log line and no
+  sheet. Every pick rebuilds the sheet and pushes `putGuides` fire-and-forget on IO under a fair
+  mutex in pick order. **Pick…** — the **first system picker any extension has opened**:
+  `ActivityResultContracts.StartActivityForResult` + `ACTION_OPEN_DOCUMENT` / `CATEGORY_OPENABLE` /
+  `image/*` / `EXTRA_MIME_TYPES` png · jpeg · webp; the result decoded with **`ImageDecoder`**
+  (EXIF-rotated, software allocator, the sample size set from the header before any pixels are
+  allocated), fit, encoded, header-checked, pushed chunk by chunk **under `SketchSaver`'s one push
+  lock** (`pushGuideImage` — not debounced, not parked, not retried; one push per pick), then
+  `putGuides`; a result is tied to the page it was opened for; no persistable grant, nothing
+  written to disk by the extension, never the Uri or the bytes in a log. Refusals — too large,
+  unreadable, not saved, could not remove — are problem dialogs, never toasts, decided before any
+  chunk is sent. **Pixel (0,0)'s alpha is taken to 254** so libwebp always writes a `VP8X` head:
+  a picture whose aspect exactly matches the page fills every pixel, and a bare `VP8 ` file would
+  fail the guard on both sides. The decoded reference is kept in memory (about 10.5 MB on the
+  Nomad, plus the sheet's 10.5 MB, only while set) so an opacity or a visibility pick redraws
+  without the host.
+- **The title** is centred in the band the two button groups leave free
+  (`centreTitleInTheFreeBand`, `START_BUTTONS` 6 / `END_BUTTONS` 2): with six start-side buttons
+  the screen's centre lies under Guides and the title read "tch".
+- Not remembered on the device — per page in the `.soil` is the memory; `SketchToolSettings`
+  unchanged.
+
+### Walk findings (J3 adb, J4 the user's hand)
+
+Guides → Lines → 4 draws a centred grid under a smudge sketch, dithered on the panel (the
+`#aaaaaa` line reads as a dotted rule); the host writes `guide_grid` in ~36 ms; a page turn away
+shows no grid and back shows Lines/4 from the row; a force-stop + reopen reloads it (`guides loaded
+in 355 ms`); the library cover shows no grid. The user's hand: the picker (the photo pushed to
+`Download/` by adb — the Supernote picker hides where a shared image lands, and it cannot be
+cancelled once stuck: `am force-stop com.android.documentsui`), tracing at 75 %, the grid over the
+photo, every tool over both. **Export proof:** a whole-notebook PNG export (`29 page(s) + 29
+sketch(es)`) — the page with a 24-line grid and the photo at 75 % exported as 1404×1872 RGB with
+**0 colour pixels** and no grid, the rasters alone.
+
+**Futures (each a fresh user decision):** a Google Drive source for reference images through our
+own browser (the export destination's shape); zoom / pan / rotate of the reference; a
+per-notebook default guide; the grid tone as a setting; the sheet on a `directInk` stroke page.
 
 ## The door
 
@@ -975,8 +1443,18 @@ notebook screen first).
 | No trusted `NSE · Sketch` is installed | A Sketch notebook loads its ordinary canvas silently; `btnSketch` stays `GONE` |
 | A replay's page-history entry names a page since renumbered | Bounded walk (`PageTurn.maxSteps`); a stale key that never resolves drops the entry rather than looping |
 | A structural replay lands mid-mark | Put back **beneath** the newer mark (generation re-check), never applied out of order |
-| The host answers **null** for `toolSettings()` | Read as "nothing remembered yet," never a failure — the face arms its own defaults (pencil, level 5, the finest lead) |
-| A remembered index (shade level or size position) this build does not offer | That field alone falls to its own default (`SketchToolState.of`) — the other two remembered fields are unaffected |
+| The host answers **null** for `toolSettings()` | Read as "nothing remembered yet," never a failure — the face arms its own defaults (the pencil at level 5, the pen at black) |
+| A remembered shade level this build does not offer | That field alone falls to its kind's default (`SketchToolState.of`) — the other remembered fields are unaffected |
+| A 20 host answers a three-int `SketchToolSettings` | The pen shade reads as black (the exhausted-parcel rule); the tool and pencil shade are honoured |
+| A stored prefs file with no `pen_shade` key (upgraded from arc 44/45) | Decodes with pen shade 0 — never "nothing remembered" |
+| The gel pen is set to white | It covers graphite and darker ink alike (ink over graphite, decision 9) and shows nothing only over bare paper; its pixels are ink, so the rubber never lifts them |
+| Pencil is drawn across an ink line | The graphite is hidden where the ink is (ink on top, decision 9) — real graphite slides off dry gel ink; not a bug |
+| A guide image's bytes pass `MAX_BYTES` or are not a page-sized WebP | `SKETCH_TOO_LARGE` / `SKETCH_BAD_IMAGE` on the guide accumulator alone; nothing written; the face shows a problem dialog (decided before any chunk is sent) |
+| A stored `guide_image` fails the header guard on read | Soft-deleted on the way past; the page loads without a reference |
+| A picked image will not decode, or runs out of memory | "Reference image unreadable" dialog; nothing pushed |
+| A picker result arrives for a page no longer shown | Dropped with a log line |
+| The guide sheet cannot be allocated | The page shows without it; a log line |
+| A host below API 22 | `:ext-sketch` never binds it — the manifest declaration is the guard |
 | A host below API 20 | `:ext-sketch` never binds it at all — the manifest declaration is the guard (arc 45 / G2 moved the action floor from 17 to 20, K5b's arrangement repeated at the new number); there is no runtime version test in `restoreTools()` |
 
 ---
@@ -999,7 +1477,7 @@ notebook screen first).
   from 550 cells / 8.98 MB to 134 cells / 2.19 MB on a corner-to-corner Nomad hairline.
 - Two page turns after drawing produce **no** undo entry and **no** dirty flag — the load being
   silent is not merely unnoticed, it was measured to produce nothing.
-- **`PencilBar`'s open and its repaint after a pick (arc 44 / T3) are the floating-bar exception,
+- **`PaletteBar`'s open and its repaint after a pick (arc 44 / T3, arc 46) are the floating-bar exception,
   not a new silence** — one chrome frame each at a deliberate tap, with the pen that made it still
   hovering (`isPenActive` counts hover; gating the frame itself would hold the bar back until the
   hand left the glass, which every other sub-bar in the family already refuses). What *is*
@@ -1010,6 +1488,41 @@ notebook screen first).
 ---
 
 ## Traps
+
+- **A bare `VP8 ` WebP fails `ImageHeader` on both sides (arc 51).** libwebp writes `VP8X` only
+  when there is alpha (or metadata) to carry; a lossy encode of a fully opaque page-sized bitmap
+  writes a plain `VP8 ` head the guard refuses. `GuideSheet.fitToPage` takes pixel (0,0)'s alpha
+  to 254 for exactly this reason — remove it and an aspect-exact photo stops saving.
+- **The Supernote file picker cannot be cancelled once stuck, and hides where a shared image
+  lands (arc 51).** `am force-stop com.android.documentsui` returns `RESULT_CANCELED` safely; push
+  a walk's image to `/sdcard/Download/` with adb and browse Downloads.
+- **Six start-side buttons put the screen's centre under the sixth (arc 51).** A title centred on
+  the screen read "tch"; the sketch face centres it in the free band instead.
+
+**A 512 KiB chunk reply can fail beside a save in flight (fixed 2026-09-22).** Binder's ~1 MB
+transaction buffer is per process and shared by everything in flight, and the face saves the page
+it is leaving while it asks for the next; a 457 KB `readSketchChunk` reply landed beside a 430 KB
+push and failed as a `DeadObjectException`, so the page came up **blank on the glass** while its
+pixels sat safe in the `.soil` — the user: "I lost the sketch for a moment … eventually the sketch
+I was working on magically came back" (a later turn read it fine). A 156 KB page never failed.
+`SketchContract.SKETCH_CHUNK_BYTES` is 128 KiB now (`MAX_CHUNKS` 13 → 49); the count travels in
+`SketchPageState`, so host and extension need not agree on the number to agree on a page. The
+symptom to recognise: `the page's GRAPHITE raster could not be read: DeadObjectException` in the
+face's log on a page turn, with the host's `requestPage` line just above it reporting the bytes.
+
+
+- **Ink is on top since arc 46 / g-paper 0.1.44 — pencil over an ink line is hidden by it.**
+  Under 0.1.39–0.1.43's `DARKEN` a white gel pen drew nothing over graphite and a grey one could
+  not show over darker graphite; the user's decision 9 put ink over graphite everywhere (engine,
+  export, cover). A white pen stroke over bare paper still shows nothing, and its pixels are ink,
+  which the rubber never lifts — expected, not a bug. Don't re-introduce `DARKEN` in any one
+  flatten copy (`SketchRaster`, `SketchCover`, the engine): the three must agree.
+- **`SketchPalette` levels are positions in Atelier's `TONES`, not `n * 0x11` (arc 46).** A stored
+  5 is `#808080` now, not `#555555`; only 0 and 15 mean what they always did. Any arithmetic that
+  derives a grey from a level is wrong — ask `shade(level)`.
+- **`SketchToolSettings.size` is a dead wire slot (arc 46 / Q1)** — written 0, never read. A
+  contract test asserting `MIN_API_VERSION_FOR_SKETCH_PEN_SHADE` is **above** the action floor is
+  the correct sense for a live tail, the reverse of G2's inversion below.
 
 - **The pencil bakes upright on Ratta (g-paper 0.1.35, 2026-09-17, branch `sketch-manta`).** The
   stable build went onto the Manta unwalked, and there the baked hairline landed **10–15× wider**
@@ -1178,7 +1691,8 @@ entry and no dirty flag.
 → **299** (arc 45 / G2); `:sn-screen` 101 → 109 → 114 → **118** (arc 44 / T3, unchanged through
 arc 45); `:ext-sketch` 0 → 52 → 60 → 87 (arc 44 / T3) → **97** (arc 45 / G3); `:app` 1717 → 1816 →
 1822 (arc 44 / T2) → **1844** (arc 45 / G2). **3631 tests in the SN root** at arc 45's freeze (3621
-at G2, 3592 at arc 44's), 0 failures at every gate.
+at G2, 3592 at arc 44's), 0 failures at every gate. **Arc 46 / Q3: 3632** (`:ext-sketch` 96 — the
+size tests gone, the two-shade tests added; `:extension-api` 300; `:app` 1845; `:sn-screen` 118).
 
 **T1–T3 (arc 44):**
 

@@ -46,6 +46,41 @@ class SketchContractTest {
     }
 
     @Test
+    fun `the pen-shade tail sits above the action floor and closes no door`() {
+        // Arc 46 / Q1: a PARCEL tail (SketchToolSettings.penShade), named at 21 the way the method
+        // floors are. Unlike the two history floors it is ABOVE the action floor — the correct
+        // sense for a live tail, the reverse of G2's inversion — and it moves no floor: a 20
+        // screen still binds, and a 21 one does too.
+        assertEquals(21, SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE > SketchContract.MIN_API_VERSION_FOR_SKETCH)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE <= ExtensionContract.API_VERSION)
+        assertEquals(20, ExtensionContract.minApiVersion(SketchContract.ACTION_SKETCH))
+        assertTrue(ExtensionContract.accepts(SketchContract.ACTION_SKETCH, 21))
+    }
+
+    @Test
+    fun `the guides floor sits above the action floor and closes no door`() {
+        // Arc 51 / J1: four METHOD tails (codes 14–17), a live tail above the action floor — the
+        // pen-shade floor's sense, not G2's inversion — and no floor moves: a 20 screen still binds.
+        assertEquals(22, SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES > SketchContract.MIN_API_VERSION_FOR_SKETCH)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES > SketchContract.MIN_API_VERSION_FOR_SKETCH_PEN_SHADE)
+        assertTrue(SketchContract.MIN_API_VERSION_FOR_SKETCH_GUIDES <= ExtensionContract.API_VERSION)
+        assertEquals(20, ExtensionContract.minApiVersion(SketchContract.ACTION_SKETCH))
+        assertTrue(ExtensionContract.accepts(SketchContract.ACTION_SKETCH, 22))
+    }
+
+    @Test
+    fun `the grid kinds and the opacity bound are pinned`() {
+        // Stored in the .soil as small ints (guide_grid rows), so pinned: a renumbering would
+        // silently turn every stored grid into another kind.
+        assertEquals(0, SketchContract.GRID_OFF)
+        assertEquals(1, SketchContract.GRID_LINES)
+        assertEquals(2, SketchContract.GRID_DOTS)
+        assertEquals(100, SketchContract.MAX_OPACITY_PERCENT)
+    }
+
+    @Test
     fun `the two rasters are pinned, distinct and the whole list`() {
         // Arc 45 / G2: the wire names a raster by a small int. Stored nowhere (a layer is a row
         // TYPE on the host's side, not a number), but compared on every chunk call, so pinned.
@@ -96,7 +131,8 @@ class SketchContractTest {
 
     @Test
     fun theChunkSizeStaysUnderTheBinderBudget() {
-        assertEquals(512 * 1024, SketchContract.SKETCH_CHUNK_BYTES)
+        // 512 KiB until 2026-09-22: a reply that size beside a save in flight overran Binder's shared buffer.
+        assertEquals(128 * 1024, SketchContract.SKETCH_CHUNK_BYTES)
         assertTrue(SketchContract.SKETCH_CHUNK_BYTES < 1024 * 1024)
     }
 
@@ -120,7 +156,7 @@ class SketchContractTest {
             SketchContract.MAX_BYTES / SketchContract.SKETCH_CHUNK_BYTES + 1,
             SketchContract.MAX_CHUNKS,
         )
-        assertEquals(13, SketchContract.MAX_CHUNKS)
+        assertEquals(49, SketchContract.MAX_CHUNKS)   // 13 at 512 KiB chunks; 49 at 128 KiB (2026-09-22)
         // And it really does bound what the chunker produces, at the cap and one under it.
         assertTrue(ByteChunks.countFor(SketchContract.MAX_BYTES) <= SketchContract.MAX_CHUNKS)
         assertTrue(ByteChunks.countFor(SketchContract.MAX_BYTES - 1) <= SketchContract.MAX_CHUNKS)

@@ -38,6 +38,24 @@ object TestWebp {
             ByteArray(tail) { filler }
     }
 
+    /**
+     * An **extended** (`VP8X`) WebP declaring [width] × [height] — the header a lossy WebP with
+     * alpha carries (arc 51 / J2's guide image), padded with filler to at least [totalBytes].
+     * Flags say alpha; the sub-chunks that would follow are filler, since the guard reads the
+     * first chunk only.
+     */
+    fun webpX(width: Int, height: Int, totalBytes: Int = 0, filler: Byte = 0x22): ByteArray {
+        val payload = byteArrayOf(0x10, 0, 0, 0) + le24(width - 1) + le24(height - 1)
+        val tail = (totalBytes - (PREAMBLE + CHUNK_HEADER + payload.size)).coerceAtLeast(0)
+        return "RIFF".ascii() +
+            le32(4 + CHUNK_HEADER + payload.size + tail) +
+            "WEBP".ascii() +
+            "VP8X".ascii() +
+            le32(payload.size) +
+            payload +
+            ByteArray(tail) { filler }
+    }
+
     /** Bytes that are not a WebP at all — the "no header" half of the guard. A PNG is one of these
      *  as far as this app is now concerned (decision 4: no legacy, no sniffing). */
     fun notAWebp(size: Int = 64): ByteArray = ByteArray(size) { 0x7F }
@@ -61,6 +79,8 @@ object TestWebp {
     private fun le32(v: Int) = byteArrayOf(
         v.toByte(), (v ushr 8).toByte(), (v ushr 16).toByte(), (v ushr 24).toByte(),
     )
+
+    private fun le24(v: Int) = byteArrayOf(v.toByte(), (v ushr 8).toByte(), (v ushr 16).toByte())
 
     private fun be32(v: Int) = byteArrayOf(
         (v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte(),
