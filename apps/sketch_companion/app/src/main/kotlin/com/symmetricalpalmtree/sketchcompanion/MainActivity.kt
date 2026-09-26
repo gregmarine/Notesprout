@@ -157,10 +157,12 @@ class MainActivity : AppCompatActivity() {
 
     // ── Focus ────────────────────────────────────────────────────────────────
 
-    /** Full screen: black around the photo, every bar gone, the screen kept awake while sketching. */
+    /** Full screen: black around the photo, every bar gone, the screen kept awake while sketching.
+     *  Entering it re-engages the lock — the framing is being looked at now, not adjusted. */
     private fun setFocus(on: Boolean) {
         if (focus == on) return
         focus = on
+        if (on && !session.locked) update(session.copy(locked = true))
         val chrome = if (on) View.GONE else View.VISIBLE
         b.topBar.visibility = chrome; b.dividerTop.visibility = chrome
         b.dividerBottom.visibility = chrome; b.panel.visibility = chrome

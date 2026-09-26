@@ -29,7 +29,8 @@ eye while looking at the phone. Not part of Notesprout; nothing here is shared a
 9. (2026-09-25, second round) **Rotate** with two fingers alongside pinch and pan — a turn within
    4° of a right angle snaps to it at the end of the gesture; the photo must still cover the frame,
    so a turn raises the least zoom. **Focus**: tap the photo (or the maximize button) for a
-   full-screen view — black letterbox, every bar hidden, the screen kept on; tap or Back returns.
+   full-screen view — black letterbox, every bar hidden, the screen kept on; tap or Back returns;
+   entering focus re-engages the lock.
    **Lock**: the framing (zoom, pan, turn) is locked by default and persisted; the lock button on
    the top bar unlocks for an adjustment and re-locks.
 
