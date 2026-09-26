@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="inkBlack">#000000</color>
+    <color name="paperWhite">#FFFFFF</color>
+    <color name="inkLight">#888888</color>
+    <color name="borderGray">#CCCCCC</color>
+
+    <!-- The grid's eight swatches — the one place colour appears in chrome: the colour itself is
+         the thing being chosen. -->
+    <color name="gridWhite">#FFFFFF</color>
+    <color name="gridBlack">#000000</color>
+    <color name="gridGrey">#888888</color>
+    <color name="gridRed">#FF0000</color>
+    <color name="gridYellow">#FFFF00</color>
+    <color name="gridGreen">#00FF00</color>
+    <color name="gridCyan">#00FFFF</color>
+    <color name="gridMagenta">#FF00FF</color>
+</resources>

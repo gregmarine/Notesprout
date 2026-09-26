@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sketch Companion</string>
+
+    <string name="action_camera">Take a photo</string>
+    <string name="action_photo">Choose a photo</string>
+    <string name="action_save">Save with grid</string>
+    <string name="action_share">Share with grid</string>
+    <string name="exporting">Exporting…</string>
+
+    <string name="hint_empty">Take or choose a photo</string>
+
+    <string name="grid_off">Off</string>
+    <string name="grid_lines">Lines</string>
+    <string name="grid_dots">Dots</string>
+    <string name="weight_thin">Thin</string>
+    <string name="weight_regular">Regular</string>
+    <string name="weight_bold">Bold</string>
+
+    <string name="toast_no_photo">No photo yet</string>
+    <string name="toast_saved">Saved to Photos</string>
+    <string name="error_title">Sketch Companion</string>
+    <string name="error_open_photo">Could not open that photo.</string>
+    <string name="error_no_camera">No camera app was found.</string>
+    <string name="error_export">Could not export the photo.</string>
+    <string name="ok">OK</string>
+</resources>

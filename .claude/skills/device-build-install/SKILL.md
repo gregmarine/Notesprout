@@ -48,6 +48,20 @@ Install all requested devices in a single shell block. If the user says devices 
 
 ---
 
+## Sketch Companion (phone companion app)
+
+Lives in `apps/sketch_companion/` with its own Gradle project; the S26U is its one device.
+
+- **applicationId:** `com.symmetricalpalmtree.sketchcompanion` (debug: `.dev`)
+
+```sh
+cd ~/git/Notesprout/apps/sketch_companion
+./gradlew :app:testDebugUnitTest :app:assembleDebug
+adb -s R3GL307HGDH install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s R3GL307HGDH shell am start -n com.symmetricalpalmtree.sketchcompanion.dev/com.symmetricalpalmtree.sketchcompanion.MainActivity
+adb -s R3GL307HGDH logcat -s SketchCompanion
+```
+
 ## Paper (experimental rebuild)
 
 Paper lives in `apps/notesprout_paper/` with its own Gradle project. See `apps/notesprout_paper/CLAUDE.md`.

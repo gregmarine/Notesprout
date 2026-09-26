@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The phone tier of the Notesprout design system (below sw720dp). -->
+    <dimen name="toolbar_button_size">44dp</dimen>
+    <dimen name="toolbar_button_padding">10dp</dimen>
+    <dimen name="toolbar_bar_thickness">56dp</dimen>
+
+    <dimen name="frame_margin">12dp</dimen>
+    <dimen name="panel_gap">6dp</dimen>
+    <dimen name="panel_side">8dp</dimen>
+    <dimen name="swatch_inset">6dp</dimen>
+</resources>

@@ -57,6 +57,15 @@ devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
   0.1.44, and baked ink shown in its true tone on the Supernote panel — settling at the next
   non-drawing event, not at pen-up, the pencil's grain in grey the same way — Phases 31–35 →
   0.1.50, incl. a 2.5 s pause settle — withdrawn 2026-09-21 along with every tool / shade / rub / undo / chrome-open settle — a mark settles only on a one-finger swipe down or a page load, g-paper Phase 37 → 0.1.52; Phase 38 the same day — the flank's grain as the point's in grey — built, walked and **withdrawn**; then **Phase 39 → 0.1.53: arc 47's flank switched OFF on the user's word, "just normal pencil regardless of tilt" — the Supernote pencil bakes upright, round lead**; both deferred in `BACKLOG.md`; its own `PALETTE_PLAN.md`; and by **arc 48 "Smudge"** 2026-09-22 on the same branch — a one-finger rub blends the pencil into a tone, g-paper Phase 40 → 0.1.54, `SMUDGE_PLAN.md`; **COMPLETE + FROZEN 2026-09-22** on four Nomad hand walks — the tone a power mean (gamma 3), the finger carrying graphite out past a mark and fading, `SKETCH_CHUNK_BYTES` 512 → 128 KiB after a Binder-buffer overrun blanked a page on the glass; **g-paper Phase 41 → 0.1.55 the same day: the Supernote panel is always dithered, nothing settles, the swipe-down settle removed — exports stay true grey**; g-paper `smudge` + `always-dither` merged to g-paper `main` and deleted 2026-09-22; **arc 51 "Guides" 2026-09-23/24 on `tools`, COMPLETE + FROZEN 2026-09-24 — a centred grid and a page-fit reference image under the sketch as tools, never exported: g-paper Phase 46 `setSheet` → 0.1.61 (merged), rows `guide_grid` + `guide_image`, API 22, `GUIDES_PLAN.md`**)
+- `apps/sketch_companion` — **Sketch Companion**, a standalone phone companion to NSE · Sketch
+  (branch `companion`, 2026-09-25; not part of Notesprout, its own Gradle root, package
+  `com.symmetricalpalmtree.sketchcompanion`, minSdk 33, the S26U its one device): photograph a
+  scene or pick one from the Photo Picker, pan/zoom it inside an always-3:4 frame (Nomad and Manta
+  pages are both exactly 3:4), lay the sketch face's own grid over it (`GridLayout` copied
+  verbatim — Off / Lines / Dots, counts `2 4 6 8 12 / 16 20 24 28 32`, centred), in eight colours
+  and three weights, and save the gridded crop to Photos or share it (≤ 4096 px wide). The photo
+  stays opaque: it is looked at on the phone, never traced. Read `apps/sketch_companion/CLAUDE.md`
+  before any work there.
 
 ---
 

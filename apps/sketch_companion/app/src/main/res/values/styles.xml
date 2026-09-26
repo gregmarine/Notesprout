@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Every icon button takes this — a tap target is dimen-driven, never hardcoded. -->
+    <style name="Widget.Companion.ToolbarButton" parent="">
+        <item name="android:layout_width">@dimen/toolbar_button_size</item>
+        <item name="android:layout_height">@dimen/toolbar_button_size</item>
+        <item name="android:background">@drawable/bg_toolbar_button</item>
+        <item name="android:padding">@dimen/toolbar_button_padding</item>
+        <item name="android:scaleType">fitCenter</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <!-- A word-labelled latch: exactly one of a row is down, and "down" is a thicker border. -->
+    <style name="Widget.Companion.LatchButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/bg_selectable_card</item>
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:minHeight">@dimen/toolbar_button_size</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:paddingStart">4dp</item>
+        <item name="android:paddingEnd">4dp</item>
+        <item name="android:paddingTop">8dp</item>
+        <item name="android:paddingBottom">8dp</item>
+    </style>
+
+    <style name="Widget.Companion.DialogButton" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
+        <item name="android:textColor">@color/inkBlack</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:background">@android:color/transparent</item>
+        <item name="android:layout_marginStart">16dp</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+    </style>
+</resources>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The Notesprout paper look on a phone: black on white, no ripple, no animation. -->
+    <style name="Theme.SketchCompanion" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">@color/inkBlack</item>
+        <item name="colorPrimaryDark">@color/inkBlack</item>
+        <item name="colorAccent">@color/inkBlack</item>
+        <item name="android:colorControlHighlight">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/paperWhite</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="alertDialogTheme">@style/Theme.SketchCompanion.AlertDialog</item>
+        <item name="android:alertDialogTheme">@style/Theme.SketchCompanion.AlertDialog</item>
+    </style>
+
+    <style name="Theme.SketchCompanion.AlertDialog" parent="Theme.AppCompat.Light.Dialog.Alert">
+        <item name="colorPrimary">@color/inkBlack</item>
+        <item name="colorAccent">@color/inkBlack</item>
+        <item name="android:windowBackground">@drawable/shape_dialog_bordered</item>
+        <item name="android:windowElevation">0dp</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:colorControlHighlight">@android:color/transparent</item>
+        <item name="android:textColorPrimary">@color/inkBlack</item>
+        <item name="android:textColorSecondary">@color/inkBlack</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.Companion.DialogButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.Companion.DialogButton</item>
+        <item name="buttonBarNeutralButtonStyle">@style/Widget.Companion.DialogButton</item>
+        <item name="android:buttonBarPositiveButtonStyle">@style/Widget.Companion.DialogButton</item>
+        <item name="android:buttonBarNegativeButtonStyle">@style/Widget.Companion.DialogButton</item>
+    </style>
+</resources>
