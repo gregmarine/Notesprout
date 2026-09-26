@@ -2,6 +2,7 @@ package com.symmetricalpalmtree.sketchcompanion.ui
 
 import android.content.Context
 import android.util.AttributeSet
+import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import androidx.appcompat.widget.AppCompatButton
@@ -13,6 +14,7 @@ class LatchRow @JvmOverloads constructor(context: Context, attrs: AttributeSet? 
 
     var onPick: ((Int) -> Unit)? = null
     private val gap = resources.getDimensionPixelSize(R.dimen.panel_gap)
+    private val size = resources.getDimensionPixelSize(R.dimen.toolbar_button_size)
 
     init { orientation = HORIZONTAL }
 
@@ -28,15 +30,15 @@ class LatchRow @JvmOverloads constructor(context: Context, attrs: AttributeSet? 
                 background = context.getDrawable(R.drawable.bg_selectable_card)
                 setTextColor(context.getColor(R.color.inkBlack))
                 textSize = 13f
-                minHeight = resources.getDimensionPixelSize(R.dimen.toolbar_button_size)
-                minimumHeight = minHeight
+                gravity = Gravity.CENTER
+                minHeight = 0; minimumHeight = 0
                 minWidth = 0; minimumWidth = 0
                 setPadding(gap / 2, 0, gap / 2, 0)
                 stateListAnimator = null
                 setOnClickListener { select(i); onPick?.invoke(i) }
             }
             decorate?.invoke(b, i)
-            addView(b, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply {
+            addView(b, LayoutParams(0, size, 1f).apply {
                 if (i > 0) marginStart = gap
             })
         }
@@ -48,6 +50,5 @@ class LatchRow @JvmOverloads constructor(context: Context, attrs: AttributeSet? 
 
     fun button(index: Int): AppCompatButton? = getChildAt(index) as? AppCompatButton
 
-    override fun setVisibility(visibility: Int) { super.setVisibility(visibility) }
     fun show(shown: Boolean) { visibility = if (shown) View.VISIBLE else View.GONE }
 }
