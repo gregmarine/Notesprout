@@ -6,6 +6,9 @@
     <string name="action_photo">Choose a photo</string>
     <string name="action_save">Save with grid</string>
     <string name="action_share">Share with grid</string>
+    <string name="action_lock">Unlock framing</string>
+    <string name="action_unlock">Lock framing</string>
+    <string name="action_focus">Full screen</string>
     <string name="exporting">Exporting…</string>
 
     <string name="hint_empty">Take or choose a photo</string>

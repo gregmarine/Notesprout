@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.widget.Toast
+import androidx.activity.addCallback
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -17,6 +18,8 @@ import androidx.appcompat.widget.TooltipCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import android.view.WindowManager
 import androidx.lifecycle.lifecycleScope
 import com.symmetricalpalmtree.sketchcompanion.crop.CropState
 import com.symmetricalpalmtree.sketchcompanion.databinding.ActivityMainBinding
@@ -41,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private var srcW = 0
     private var srcH = 0
     private var busy = false
+    private var focus = false
 
     private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         if (ok) adopt(photos.cameraUri())
@@ -56,13 +60,13 @@ class MainActivity : AppCompatActivity() {
         setContentView(b.root)
         ViewCompat.setOnApplyWindowInsetsListener(b.root) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            if (focus) v.setPadding(0, 0, 0, 0) else v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
         photos = PhotoStore(this)
         sessions = SessionStore(this)
 
-        for (btn in listOf(b.btnCamera, b.btnPhoto, b.btnSave, b.btnShare)) {
+        for (btn in listOf(b.btnCamera, b.btnPhoto, b.btnLock, b.btnFocus, b.btnSave, b.btnShare)) {
             TooltipCompat.setTooltipText(btn, btn.contentDescription)
         }
         b.btnCamera.setOnClickListener {
@@ -78,6 +82,12 @@ class MainActivity : AppCompatActivity() {
         b.btnSave.setOnClickListener { export(share = false) }
         b.btnShare.setOnClickListener { export(share = true) }
         b.frame.onCropChanged = { crop -> update(session.copy(crop = crop), applyToFrame = false) }
+        b.frame.onTap = { if (session.photoFile != null) setFocus(!focus) }
+        b.btnLock.setOnClickListener { update(session.copy(locked = !session.locked)) }
+        b.btnFocus.setOnClickListener { if (session.photoFile != null) setFocus(true) else toast(R.string.toast_no_photo) }
+        onBackPressedDispatcher.addCallback(this) {
+            if (focus) setFocus(false) else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+        }
 
         buildPanel()
         applyPanel()
@@ -139,6 +149,33 @@ class MainActivity : AppCompatActivity() {
         b.rowWeight.select(s.gridWeight)
         val on = s.gridKind != Grid.OFF
         b.rowCountA.show(on); b.rowCountB.show(on); b.rowColor.show(on); b.rowWeight.show(on)
+        b.frame.locked = s.locked
+        b.btnLock.setImageResource(if (s.locked) R.drawable.ic_lock else R.drawable.ic_lock_open)
+        b.btnLock.contentDescription = getString(if (s.locked) R.string.action_lock else R.string.action_unlock)
+        TooltipCompat.setTooltipText(b.btnLock, b.btnLock.contentDescription)
+    }
+
+    // ── Focus ────────────────────────────────────────────────────────────────
+
+    /** Full screen: black around the photo, every bar gone, the screen kept awake while sketching. */
+    private fun setFocus(on: Boolean) {
+        if (focus == on) return
+        focus = on
+        val chrome = if (on) View.GONE else View.VISIBLE
+        b.topBar.visibility = chrome; b.dividerTop.visibility = chrome
+        b.dividerBottom.visibility = chrome; b.panel.visibility = chrome
+        b.root.setBackgroundColor(getColor(if (on) android.R.color.black else R.color.paperWhite))
+        b.frame.setFocus(on)
+        val controller = WindowInsetsControllerCompat(window, b.root)
+        if (on) {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        ViewCompat.requestApplyInsets(b.root)
     }
 
     private fun applyGrid() {

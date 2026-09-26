@@ -14,6 +14,8 @@ data class Session(
     val gridCount: Int = Grid.DEFAULT_COUNT,
     val gridColor: Int = Grid.DEFAULT_COLOR,
     val gridWeight: Int = GridWeight.DEFAULT.ordinal,
+    /** The frame's zoom, pan and turn are held still until the user unlocks them — locked by default. */
+    val locked: Boolean = true,
 ) {
     /** A session read back with values this build does not know falls to the defaults. */
     fun sanitized(): Session = copy(

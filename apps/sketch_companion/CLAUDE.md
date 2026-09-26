@@ -26,15 +26,22 @@ eye while looking at the phone. Not part of Notesprout; nothing here is shared a
    resolution capped at 4096 px wide. The photo is 100 % opaque, the grid on top.
 8. The last session is restored: the photo is copied into `filesDir`, crop and grid settings in
    `filesDir/session.json`.
+9. (2026-09-25, second round) **Rotate** with two fingers alongside pinch and pan — a turn within
+   4° of a right angle snaps to it at the end of the gesture; the photo must still cover the frame,
+   so a turn raises the least zoom. **Focus**: tap the photo (or the maximize button) for a
+   full-screen view — black letterbox, every bar hidden, the screen kept on; tap or Back returns.
+   **Lock**: the framing (zoom, pan, turn) is locked by default and persisted; the lock button on
+   the top bar unlocks for an adjustment and re-locks.
 
 ## Shape
 
 - `MainActivity` — the one screen. `ui/FrameView` — the 3:4 frame (matrix, clip, gestures, grid).
   `ui/LatchRow` — a row where exactly one button is down.
-- `crop/CropMath` — the pure arithmetic of the frame (`zoom` + normalised centre); `clamp` *is* the
-  "always covers" invariant. `grid/GridPainter` is the one painter for screen and export.
+- `crop/CropMath` — the pure arithmetic of the frame (`zoom` + normalised centre + `angle`);
+  `clamp` *is* the "always covers" invariant (the turned frame's bounding box inside the photo). `grid/GridPainter` is the one painter for screen and export.
 - `photo/PhotoStore` + `photo/PhotoDecoder` — the held photo and its `ImageDecoder` display decode
-  (orientation applied; ≤ 3072 px long edge). `export/ExportRenderer` decodes the crop straight
-  from the file through `ImageDecoder.setCrop` (oriented space, no EXIF library);
+  (orientation applied; ≤ 3072 px long edge). `export/ExportRenderer` decodes the region behind the
+  turned frame straight from the file through `ImageDecoder.setCrop` (oriented space, no EXIF
+  library) and draws it through the same turn the screen shows;
   `export/ExportSink` writes to MediaStore or a FileProvider cache file.
 - JVM tests: `GridLayoutTest` (copied), `GridWeightTest`, `CropMathTest`.

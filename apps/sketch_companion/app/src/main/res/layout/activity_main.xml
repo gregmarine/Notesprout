@@ -28,6 +28,20 @@
             android:contentDescription="@string/action_photo"
             android:src="@drawable/ic_photo" />
 
+        <ImageButton
+            android:id="@+id/btnLock"
+            style="@style/Widget.Companion.ToolbarButton"
+            android:layout_marginStart="@dimen/panel_gap"
+            android:contentDescription="@string/action_lock"
+            android:src="@drawable/ic_lock" />
+
+        <ImageButton
+            android:id="@+id/btnFocus"
+            style="@style/Widget.Companion.ToolbarButton"
+            android:layout_marginStart="@dimen/panel_gap"
+            android:contentDescription="@string/action_focus"
+            android:src="@drawable/ic_maximize" />
+
         <TextView
             android:id="@+id/status"
             android:layout_width="0dp"
@@ -52,6 +66,7 @@
     </LinearLayout>
 
     <View
+        android:id="@+id/dividerTop"
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:background="@color/inkBlack" />
@@ -64,6 +79,7 @@
         android:padding="@dimen/frame_margin" />
 
     <View
+        android:id="@+id/dividerBottom"
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:background="@color/inkBlack" />

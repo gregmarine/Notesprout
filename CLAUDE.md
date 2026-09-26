@@ -63,7 +63,8 @@ devices first (BOOX), expanding to iPad, Android tablets, phones, and web.
   scene or pick one from the Photo Picker, pan/zoom it inside an always-3:4 frame (Nomad and Manta
   pages are both exactly 3:4), lay the sketch face's own grid over it (`GridLayout` copied
   verbatim — Off / Lines / Dots, counts `2 4 6 8 12 / 16 20 24 28 32`, centred), in eight colours
-  and three weights, and save the gridded crop to Photos or share it (≤ 4096 px wide). The photo
+  and three weights, turn it with two fingers, lock the framing (locked by default), view it full
+  screen on black, and save the gridded crop to Photos or share it (≤ 4096 px wide). The photo
   stays opaque: it is looked at on the phone, never traced. Read `apps/sketch_companion/CLAUDE.md`
   before any work there.
 
